@@ -13,7 +13,7 @@ jist "{"a":"b", "c": {"d": ["e", "f", "g"]}}" "c.d"
 Or
 
 ```
-jist "[{"a": "b"}, {"c": {"d": "e"}}]" "root[1].c"
+jist "[{"a": "b"}, {"c": {"d": "e"}}]" "[1].c"
 ```
 
 ```
@@ -29,7 +29,7 @@ One of the use cases I had in mind was being able to extract values from JSON ob
    `jist` can take any valid JSON as input including an array root type. It expects the search key to be valid given the requested key.
 
 ```
-wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "root[0].commit.author"
+wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "[0].commit.author"
 ```
 
 ```
@@ -40,27 +40,27 @@ wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jis
 }
 ```
 
-You can find values for keys that are deeply nested
+2. You can find values for keys that are deeply nested
 
 ```
-wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "root[0].commit.author.name"
+wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "[0].commit.author.name"
 ```
 
 ```
 adelamodwala
 ```
 
-If the root object is an array, then it's named `root` by default. All arrays are used like Javascript arrays syntactically.
+3. If the root object is an array, then it's named `root` by default. All arrays are used like Javascript arrays syntactically.
 
 ```
-wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "root[0].parents"
+wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist "[0].parents"
 ```
 
 ```
 []
 ```
 
-# Algorigthm
+# Algorithm
 
 ## Goals
 
