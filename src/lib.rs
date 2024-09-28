@@ -12,8 +12,24 @@ pub fn search(haystack: String, search_key: String) -> Result<String, &'static s
 
     let search_path = parse_search_key(search_key);
     // next need to iteratively parse haystack along search_path without parsing all of it
+    let mut idx = 0;
+    let mut haystack_chars = haystack.chars();
+    for (path_pos, key) in search_path.iter().enumerate() {
+        if key.starts_with("[") {
+            if haystack_chars.nth(idx).unwrap().to_string() != "[" {
+                cancel_search_panic(&search_path, path_pos, idx);
+            }
+
+        }
+    }
 
     Ok("done".to_string())
+}
+
+fn cancel_search_panic(search_path: &Vec<String>, path_pos_reached: usize, idx: usize) {
+    panic!("{}", format!(r"cancelled search:
+    path_reached: {}
+    haystack[idx]: {}", search_path[..=path_pos_reached].join("."), idx.to_string()));
 }
 
 fn parse_search_key(search_key: String) -> Vec<String> {
@@ -50,6 +66,12 @@ mod tests {
     #[test]
     fn empty_search_key() {
         assert!(search(r#"{"a": "b"}"#.to_string(), "".to_string()).is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn mismatched_search_key_no_array() {
+        let _ = search(r#"{"a": "b"}"#.to_string(), "[0].a".to_string());
     }
 
     #[test]
