@@ -10,7 +10,7 @@ struct Args {
     data: Option<String>,
 
     #[arg(short, long)]
-    search_key: String,
+    path: String,
 }
 
 fn main() {
@@ -19,12 +19,12 @@ fn main() {
         text
     } else {
         let mut buffer = String::new();
-        io::stdin().read_to_string(&mut buffer).expect("no input provided");
+        io::stdin().read_to_string(&mut buffer).expect("data not provided");
         buffer
     };
 
 
-    match search(haystack.as_str(), args.search_key.as_str()) {
+    match search(haystack.as_str(), args.path.as_str()) {
         Ok(result) => println!("{}", result),
         Err(error) => panic!("{}", error),
     }
