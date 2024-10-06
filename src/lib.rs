@@ -16,7 +16,7 @@ pub fn search(haystack: &str, search_key: &str) -> Result<String, &'static str> 
 
     // collect
     let mut path_val = &json;
-    for (path_pos, key) in search_path.iter().enumerate() {
+    for key in search_path.iter() {
         let idx = array_ind(key.to_string());
         if idx > -1 {
             path_val = &path_val[idx.unsigned_abs() as usize];
@@ -30,12 +30,6 @@ pub fn search(haystack: &str, search_key: &str) -> Result<String, &'static str> 
         return Ok(path_val.as_str().unwrap().to_string());
     }
     Ok(path_val.to_string())
-}
-
-fn cancel_search_panic(search_path: &Vec<String>, path_pos_reached: usize, idx: usize) {
-    panic!("{}", format!(r"cancelled search:
-    path_reached: {}
-    haystack[idx]: {}", search_path[..=path_pos_reached].join("."), idx.to_string()));
 }
 
 fn parse_search_key(search_key: String) -> Vec<String> {
