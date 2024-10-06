@@ -76,6 +76,7 @@ mod tests {
 
     #[test]
     fn object_search() {
+        assert_eq!(search(r#"{"b":"c"}"#, "b"), Ok("c".to_string()));
         assert_eq!(search(r#"{"b": {"a":"d"},"a":{"b":{"c":"e"}}}"#, "a.b"), Ok(r#"{"c":"e"}"#.to_string()));
         assert_eq!(search(r#"
             [
