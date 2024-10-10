@@ -2,6 +2,9 @@
 
 `jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key:
 
+![demo](https://github.com/user-attachments/assets/d59b3a74-233f-4eed-841e-7148f5ed104b)
+
+
 ```
 $ jist --data '{"a":"b", "c": {"d": ["e", "f", "g"]}}' --path "c.d"
 ["e", "f", "g"]
