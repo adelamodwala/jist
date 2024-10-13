@@ -2,7 +2,7 @@
 
 `jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key:
 
-[![Watch the video](https://i.redd.it/l1luphdlsvl41.png)](https://github.com/user-attachments/assets/eb0c93e5-2380-434d-acc1-5ea6b470e50b)
+![demo](demo.gif)
 
 Or
 
