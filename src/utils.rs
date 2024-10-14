@@ -17,6 +17,16 @@ pub(crate) fn array_ind(accessor: String) -> i64 {
     val
 }
 
+pub(crate) fn parse_search_key(search_key: String) -> Vec<String> {
+    search_key.split(&['.'][..]).map(|s| {
+        let s = match s.find("[") {
+            Some(i) => s.split_at(i),
+            None => (s, ""),
+        };
+        vec![s.0, s.1]
+    }).flatten().filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +35,15 @@ mod tests {
         assert_eq!(array_ind("0".to_string()), -1);
         assert_eq!(array_ind("waef".to_string()), -1);
         assert_eq!(array_ind("[11]".to_string()), 11);
+    }
+
+    #[test]
+    fn parse_search_key_test() {
+        assert_eq!(parse_search_key("myroot".to_string()), vec!["myroot"]);
+        assert_eq!(parse_search_key("myroot.child1".to_string()), vec!["myroot", "child1"]);
+        assert_eq!(parse_search_key("myroot.child1.grandchild1".to_string()), vec!["myroot", "child1", "grandchild1"]);
+        assert_eq!(parse_search_key("myroot.child1[0]".to_string()), vec!["myroot", "child1", "[0]"]);
+        assert_eq!(parse_search_key("myroot.child1[0].arr1".to_string()), vec!["myroot", "child1", "[0]", "arr1"]);
+        assert_eq!(parse_search_key("[2].child1[0].arr1".to_string()), vec!["[2]", "child1", "[0]", "arr1"]);
     }
 }

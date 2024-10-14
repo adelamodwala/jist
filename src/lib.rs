@@ -1,3 +1,5 @@
+use crate::utils::parse_search_key;
+
 mod parse_top_level;
 mod parse_all;
 mod utils;
@@ -11,16 +13,6 @@ pub fn search(haystack: &str, search_key: &str) -> Result<String, &'static str> 
 
     parse_all::search(haystack, &search_path)
     // parse_top_level::search(haystack, &search_path)
-}
-
-fn parse_search_key(search_key: String) -> Vec<String> {
-    search_key.split(&['.'][..]).map(|s| {
-        let s = match s.find("[") {
-            Some(i) => s.split_at(i),
-            None => (s, ""),
-        };
-        vec![s.0, s.1]
-    }).flatten().filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()
 }
 
 #[cfg(test)]
@@ -66,15 +58,5 @@ mod tests {
     fn array_search() {
         assert_eq!(search(r#"[{"x": "y"}, {"p":"q"}]"#, "[1].p"), Ok(r#"q"#.to_string()));
         assert_eq!(search(r#"[{"x": "y"}, {"p":"\"q\""}]"#, "[1].p"), Ok(r#""q""#.to_string()));
-    }
-
-    #[test]
-    fn parse_search_key_test() {
-        assert_eq!(parse_search_key("myroot".to_string()), vec!["myroot"]);
-        assert_eq!(parse_search_key("myroot.child1".to_string()), vec!["myroot", "child1"]);
-        assert_eq!(parse_search_key("myroot.child1.grandchild1".to_string()), vec!["myroot", "child1", "grandchild1"]);
-        assert_eq!(parse_search_key("myroot.child1[0]".to_string()), vec!["myroot", "child1", "[0]"]);
-        assert_eq!(parse_search_key("myroot.child1[0].arr1".to_string()), vec!["myroot", "child1", "[0]", "arr1"]);
-        assert_eq!(parse_search_key("[2].child1[0].arr1".to_string()), vec!["[2]", "child1", "[0]", "arr1"]);
     }
 }
