@@ -28,6 +28,8 @@ fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i32, i32) {
 }
 
 pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'static str> {
+    println!("--- Searching for {} on path: {:?}", haystack, search_path);
+
     let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
 
     // tuple of (depth, arr_depth, obj_depth)
@@ -36,8 +38,7 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
     // keep track of array indices if currently inside array
     let mut arr_idx = Vec::new();
     let mut last_open: Vec<TokenType> = Vec::new();
-    let mut val_idx: (i32, i32) = (-1, -1);
-    let mut checkpoint_start = -1;
+    let mut checkpoint_start = Vec::new();
 
     // build checkpoints that must pass
     let mut checkpoints = Vec::new();
@@ -51,6 +52,7 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
         .map(|x| array_ind(x.clone()))
         .rev()
         .collect();
+    let arr_tgt_size = arr_tgt.len();
     let mut search_keys = search_path.iter()
         .filter(|x| !x.starts_with("["))
         .map(|x| x.clone())
@@ -99,72 +101,29 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
             // check if inside an array and iterating to find the expected place
             if *last_open.last().unwrap() == TokenType::BracketOpen && arr_idx.last().unwrap().cmp(&arr_tgt.last().unwrap()) == Ordering::Equal {
                 let (first, end) = token_pos(&token.buf)?;
-                if checkpoint_start > -1 {
-                    println!("***checkpoint ended***");
-                    checkpoints.pop();
 
-                    // terminal point
-                    if checkpoints.len() == 0 {
-                        // add 1 to starting index to exclude commas or brackets
-                        return Ok(haystack[checkpoint_start as usize + 1..(end as usize)].to_string());
-                    } else {
-                        checkpoint_start = -1;
-                    }
+                // terminal point
+                if checkpoints.len() == 1 && checkpoint_start.len() == arr_tgt_size {
+                    println!("***checkpoint ended***");
+
+                    // add 1 to starting index to exclude commas or brackets
+                    return Ok(haystack[checkpoint_start.last().unwrap() + 1..(end as usize)].trim().to_string());
                 } else {
                     println!("***checkpoint started***");
 
-                    checkpoint_start = first as i32;
+                    checkpoint_start.push(first as usize);
+                    if arr_tgt.len() > 1 {
+                        arr_tgt.pop();
+                    }
+                }
+
+                if checkpoints.len() > 1 {
+                    checkpoints.pop();
                 }
             }
         }
 
-        // match depth_curr.cmp(&depth_tgt) {
-        //     Ordering::Equal => {
-        //         if !arr_idx.is_empty() {
-        //             match arr_idx.cmp(&arr_tgt) {
-        //                 Ordering::Equal => {
-        //                     let (first, end) = token_pos(&token.buf)?;
-        //                     if val_idx.0 < 0 {
-        //                         val_idx.0 = first as i32;
-        //                     }
-        //                     val_idx.1 = end as i32;
-        //                 }
-        //                 _ => {}
-        //             }
-        //         } else {
-        //             // need to find the relevant key
-        //             let search_key = search_keys.last().unwrap();
-        //             while depth_curr.cmp(&depth_tgt) == Ordering::Equal {
-        //                 token = token_iter.next().unwrap();
-        //                 if token.kind == TokenType::Comma {
-        //                     token = token_iter.next().unwrap();
-        //                     let (first, end) = token_pos(&token.buf)?;
-        //                     let (start, finish) = (first as usize, end as usize);
-        //                     if start >= 0 && finish < haystack.len() {
-        //                         let key = &haystack[start..finish];
-        //                         if (key.cmp(search_key) == Ordering::Equal) && search_keys.len() == 1 {
-        //                             token = token_iter.next().unwrap();
-        //                             let (first, end) = token_pos(&token.buf)?;
-        //                             val_idx.0 = first as i32;
-        //                             if is_primitive_token(token.kind) {
-        //                                 val_idx.1 = end as i32;
-        //                                 return Ok(haystack[val_idx.0 as usize..(val_idx.1 as usize)].to_string());
-        //                             }
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //
-        //         }
-        //     }
-        //     _ => {
-        //         if val_idx.1 >= 0 {
-        //             return Ok(haystack[val_idx.0 as usize..(val_idx.1 as usize)].to_string());
-        //         }
-        //     }
-        // }
-
-        if !token_iter.peek().is_some() && val_idx.1 < 0 {
+        if !token_iter.peek().is_some() {
             return Err("incomplete haystack");
         }
     }
@@ -206,7 +165,11 @@ mod tests {
 
         assert_eq!(search(r#"[{"x":"y"},{"a":{"b": "c"}},1]"#, &vec!("[0]".to_string())), Ok(r#"{"x":"y"}"#.to_string()));
         assert_eq!(search(r#"[{"x":"y"},{"a":{"b": "c"}},1]"#, &vec!("[1]".to_string())), Ok(r#"{"a":{"b": "c"}}"#.to_string()));
-        assert_eq!(search(r#"[8,9,1]"#, &vec!("[2]".to_string())), Ok("1".to_string()));
+
+        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string(), "[1]".to_string(), "[1]".to_string())), Ok("7".to_string()));
+        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string(), "[1]".to_string())), Ok("[6,7]".to_string()));
+        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[2]".to_string())), Ok("1".to_string()));
+        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string())), Ok("[3, [6,7],5]".to_string()));
         // assert_eq!(search(r#"
         //     [
         //         [-140.5405, [2, 3], "n", {"o": "p"}],
