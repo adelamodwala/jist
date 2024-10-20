@@ -1,5 +1,6 @@
 use crate::utils::array_ind;
 use json_tools::{Buffer, BufferType, Lexer, TokenType};
+use serde_json::Value;
 use std::cmp::Ordering;
 
 fn token_pos(buf: &Buffer) -> Result<(u64, u64), &'static str> {
@@ -18,6 +19,15 @@ fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i32, i32) {
         search_array_nodes - 1,
         search_obj_nodes - 1
     )
+}
+
+fn sanitize_output(out: &str) -> String {
+    let sanitized = out.trim().trim_start_matches("\"").trim_end_matches("\"");
+    if sanitized.starts_with(&['{', '[']) {
+        let json: Value = serde_json::from_str(sanitized).expect("JSON parsing error");
+        return json.to_string();
+    }
+    sanitized.to_string()
 }
 
 pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'static str> {
@@ -100,7 +110,8 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
                     println!("[checkpoint ended]");
 
                     // add 1 to starting index to exclude commas or brackets
-                    return Ok(haystack[checkpoint_start.last().unwrap() + 1..(end as usize)].trim().trim_start_matches("\"").trim_end_matches("\"").to_string());
+                    // return Ok(haystack[checkpoint_start.last().unwrap() + 1..(end as usize)].trim().trim_start_matches("\"").trim_end_matches("\"").to_string());
+                    return Ok(sanitize_output(&haystack[checkpoint_start.last().unwrap() + 1..(end as usize)]));
                 } else {
                     println!("[checkpoint started]");
 
@@ -133,13 +144,13 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
                     let (first, end) = token_pos(&token.buf)?;
                     match token.kind {
                         TokenType::String | TokenType::Number | TokenType::BooleanFalse | TokenType::BooleanTrue | TokenType::Null => {
-                            return Ok(haystack[first as usize..(end as usize)].trim().trim_start_matches("\"").trim_end_matches("\"").to_string());
+                            return Ok(sanitize_output(&haystack[first as usize..(end as usize)]));
                         }
                         TokenType::Colon => {
                             checkpoint_start.push(first as usize);
                         }
                         TokenType::CurlyClose | TokenType::BracketClose => {
-                            return Ok(haystack[checkpoint_start.last().unwrap() + 1..(end as usize)].trim().to_string());
+                            return Ok(sanitize_output(&haystack[checkpoint_start.last().unwrap() + 1..(end as usize)]));
                         }
                         _ => {}
                     }
@@ -157,7 +168,6 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
 mod tests {
     use super::*;
     use crate::utils::parse_search_key;
-    use serde_json::Value;
 
     #[test]
     fn checkpoint_depth_test() {
@@ -182,12 +192,12 @@ mod tests {
         assert_eq!(search(r#"[8,9,1]"#, &vec!("[2]".to_string())), Ok("1".to_string()));
 
         assert_eq!(search(r#"[{"x":"y"},{"a":{"b": "c"}},1]"#, &vec!("[0]".to_string())), Ok(r#"{"x":"y"}"#.to_string()));
-        assert_eq!(search(r#"[{"x":"y"},{"a":{"b": "c"}},1]"#, &vec!("[1]".to_string())), Ok(r#"{"a":{"b": "c"}}"#.to_string()));
+        assert_eq!(search(r#"[{"x":"y"},{"a":{"b": "c"}},1]"#, &vec!("[1]".to_string())), Ok(r#"{"a":{"b":"c"}}"#.to_string()));
 
         assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &parse_search_key("[0][1][1]".to_string())), Ok("7".to_string()));
         assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string(), "[1]".to_string())), Ok("[6,7]".to_string()));
         assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[2]".to_string())), Ok("1".to_string()));
-        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string())), Ok("[3, [6,7],5]".to_string()));
+        assert_eq!(search(r#"[[3, [6,7],5],9,1]"#, &vec!("[0]".to_string())), Ok("[3,[6,7],5]".to_string()));
     }
 
     #[test]
@@ -205,7 +215,7 @@ mod tests {
 
     #[test]
     fn mixed() {
-        let mut result = search(r#"
+        let json1 = r#"
             [
                 [-140.5405, [2, 3], "n", {"o": "p"}],
                 "c",
@@ -233,11 +243,12 @@ mod tests {
                     "d",
                     "e"
                 ]
-            ]"#, &parse_search_key("[3].a.b".to_string())).unwrap();
-        let mut json: Value = serde_json::from_str(&result).expect("Invalid JSON");
-        assert_eq!(json.to_string(), "[2,7,4]".to_string());
+            ]"#;
+        assert_eq!(search(json1, &parse_search_key("[3].a.b".to_string())).unwrap(), "[2,7,4]".to_string());
+        assert_eq!(search(json1, &parse_search_key("[3].a.b[0]".to_string())).unwrap(), "2".to_string());
+        assert_eq!(search(json1, &parse_search_key("[3].a".to_string())).unwrap(), r#"{"x":"y\"b\"","b":[2,7,4]}"#.to_string());
 
-        result = search(r#"
+        assert_eq!(search(r#"
             {
                 "a": {
                     "x": "y\"b\"",
@@ -247,8 +258,6 @@ mod tests {
                         4
                     ]
                 }
-            }"#, &parse_search_key("a.b".to_string())).unwrap();
-        json = serde_json::from_str(&result).expect("Invalid JSON");
-        assert_eq!(json.to_string(), "[2,3,4]".to_string());
+            }"#, &parse_search_key("a.b".to_string())).unwrap(), "[2,3,4]".to_string());
     }
 }
