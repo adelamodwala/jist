@@ -31,7 +31,7 @@ fn sanitize_output(out: &str) -> String {
 }
 
 pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'static str> {
-    println!("--- Searching for {} on path: {:?}", haystack, search_path);
+    // println!("--- Searching for {} on path: {:?}", haystack, search_path);
 
     let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
 
@@ -61,7 +61,7 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
         .map(|x| x.clone())
         .rev()
         .collect::<Vec<String>>();
-    println!("checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}", checkpoints, arr_tgt, search_keys);
+    // println!("checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}", checkpoints, arr_tgt, search_keys);
 
     loop {
         let mut token = token_iter.next().unwrap();
@@ -98,7 +98,7 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
             }
             _ => {}
         }
-        println!("depth_curr: {:?}, arr_idx: {:?}, search_keys: {:?}, kind: {:?}, last_open: {:?}, checkpoints: {:?}, checkpoint_start: {:?}", depth_curr, arr_idx, search_keys, &token.kind, last_open, checkpoints, checkpoint_start);
+        // println!("depth_curr: {:?}, arr_idx: {:?}, search_keys: {:?}, kind: {:?}, last_open: {:?}, checkpoints: {:?}, checkpoint_start: {:?}", depth_curr, arr_idx, search_keys, &token.kind, last_open, checkpoints, checkpoint_start);
 
         if depth_curr.cmp(&checkpoints.last().unwrap()) == Ordering::Equal {
             // check if inside an array and iterating to find the expected place
@@ -107,13 +107,13 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
 
                 // terminal point
                 if checkpoints.len() == 1 && checkpoint_start.len() == arr_tgt_size {
-                    println!("[checkpoint ended]");
+                    // println!("[checkpoint ended]");
 
                     // add 1 to starting index to exclude commas or brackets
                     // return Ok(haystack[checkpoint_start.last().unwrap() + 1..(end as usize)].trim().trim_start_matches("\"").trim_end_matches("\"").to_string());
                     return Ok(sanitize_output(&haystack[checkpoint_start.last().unwrap() + 1..(end as usize)]));
                 } else {
-                    println!("[checkpoint started]");
+                    // println!("[checkpoint started]");
 
                     checkpoint_start.push(first as usize);
                     if arr_tgt.len() > 1 {
@@ -126,19 +126,21 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
                 }
             } else if *last_open.last().unwrap() == TokenType::CurlyOpen {
                 if (token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma) && search_keys.len() > 0 {
-                    if token.kind == TokenType::CurlyOpen { println!("\\checkpoint started\\") }
+                    if token.kind == TokenType::CurlyOpen {
+                        // println!("\\checkpoint started\\");
+                    }
 
                     // next token should be a key
                     token = token_iter.next().expect("incomplete json object");
                     let (first, end) = token_pos(&token.buf)?;
                     let key = haystack[first as usize..end as usize].trim_start_matches("\"").trim_end_matches("\"");
                     if key.cmp(&search_keys.last().unwrap()) == Ordering::Equal {
-                        println!(">>>found next key: {:?}", key);
+                        // println!(">>>found next key: {:?}", key);
                         search_keys.pop();
-                    }
 
-                    if checkpoints.len() > 1 {
-                        checkpoints.pop();
+                        if checkpoints.len() > 1 {
+                            checkpoints.pop();
+                        }
                     }
                 } else if search_keys.len() == 0 && checkpoints.len() == 1 {
                     let (first, end) = token_pos(&token.buf)?;
@@ -259,5 +261,55 @@ mod tests {
                     ]
                 }
             }"#, &parse_search_key("a.b".to_string())).unwrap(), "[2,3,4]".to_string());
+    }
+
+    #[test]
+    fn sibling_keys() {
+        let sample = r#"[
+    {
+        "id": "50b21bee-4198-4183-bb0f-597f3cd2e1bf",
+        "name": "Test",
+        "attributes": [
+            {
+                "shirt": "red",
+                "pants": "black"
+            },
+            {
+                "shirt": "yellow",
+                "pants": "black"
+            }
+        ]
+    },
+    {
+        "id": "a179bc6e-6976-4e89-99ce-08974b388d41",
+        "name": "Test",
+        "attributes": [
+            {
+                "shirt": "red",
+                "pants": "blue"
+            },
+            {
+                "shirt": "red",
+                "pants": "orange"
+            }
+        ]
+    },
+    {
+        "id": "fbfe64c0-2bf6-43b7-82d0-5e1594019597",
+        "name": "Test",
+        "attributes": [
+            {
+                "shirt": "yellow",
+                "pants": "black"
+            },
+            {
+                "shirt": "green",
+                "pants": "orange"
+            }
+        ]
+    }
+]"#;
+        let search_path = parse_search_key("[1].attributes[1].shirt".to_string());
+        assert_eq!(search(sample, &search_path).unwrap(), "red".to_string());
     }
 }

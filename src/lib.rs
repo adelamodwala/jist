@@ -11,8 +11,8 @@ pub fn search(haystack: &str, search_key: &str) -> Result<String, &'static str> 
 
     let search_path = parse_search_key(search_key.to_string());
 
-    parse_all::search(haystack, &search_path)
-    // parse_top_level::search(haystack, &search_path)
+    // parse_all::search(haystack, &search_path)
+    parse_top_level::search(haystack, &search_path)
 }
 
 #[cfg(test)]
