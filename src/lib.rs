@@ -3,6 +3,7 @@ use crate::utils::parse_search_key;
 mod parse_top_level;
 mod parse_all;
 mod utils;
+mod buf_parser;
 
 pub fn search(haystack: &str, search_key: &str) -> Result<String, &'static str> {
     if haystack.is_empty() || search_key.is_empty() {
