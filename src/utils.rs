@@ -1,5 +1,7 @@
+use json_tools::Buffer;
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde_json::Value;
 
 lazy_static! {
     static ref ARRAY_REGEX: Regex = Regex::new(r"^\[(\d+)\]$").unwrap();
@@ -24,6 +26,33 @@ pub(crate) fn parse_search_key(search_key: String) -> Vec<String> {
         .collect()
 }
 
+pub(crate) fn token_pos(buf: &Buffer) -> Result<(u64, u64), &'static str> {
+    let (first, end) = match buf {
+        Buffer::Span(pos) => (pos.first, pos.end),
+        _ => { return Err("error"); }
+    };
+    Ok((first, end))
+}
+
+pub(crate) fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i32, i32) {
+    let search_array_nodes = search_path[..idx + 1].iter().filter(|x| x.starts_with("[")).count() as i32;
+    let search_obj_nodes = idx as i32 + 1 - search_array_nodes;
+    (
+        idx as i32,
+        search_array_nodes - 1,
+        search_obj_nodes - 1
+    )
+}
+
+pub(crate) fn sanitize_output(out: &str) -> String {
+    let sanitized = out.trim().trim_start_matches("\"").trim_end_matches("\"");
+    if sanitized.starts_with(&['{', '[']) {
+        let json: Value = serde_json::from_str(sanitized).expect("JSON parsing error");
+        return json.to_string();
+    }
+    sanitized.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +74,21 @@ mod tests {
         assert_eq!(parse_search_key("[1][1][1].b".to_string()), vec!["[1]", "[1]", "[1]", "b"]);
         assert_eq!(parse_search_key("x.y[1][1][1].b".to_string()), vec!["x", "y","[1]", "[1]", "[1]", "b"]);
         assert_eq!(parse_search_key("x.y[1][1][1].b[1222][439834]".to_string()), vec!["x", "y","[1]", "[1]", "[1]", "b", "[1222]", "[439834]"]);
+    }
+
+    #[test]
+    fn checkpoint_depth_test() {
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 0), (0, -1, 0));
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 1), (1, -1, 1));
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 2), (2, 0, 1));
+
+        assert_eq!(checkpoint_depth(&parse_search_key("[2]".to_string()), 0), (0, 0, -1));
+
+        assert_eq!(checkpoint_depth(&vec!["a".to_string()], 0), (0, -1, 0));
+
+        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 0), (0, 0, -1));
+        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 1), (1, 1, -1));
+        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 2), (2, 2, -1));
+        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 3), (3, 2, 0));
     }
 }

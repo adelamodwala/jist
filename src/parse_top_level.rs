@@ -1,34 +1,6 @@
-use crate::utils::array_ind;
-use json_tools::{Buffer, BufferType, Lexer, TokenType};
-use serde_json::Value;
+use crate::utils::{array_ind, checkpoint_depth, sanitize_output, token_pos};
+use json_tools::{BufferType, Lexer, TokenType};
 use std::cmp::Ordering;
-
-fn token_pos(buf: &Buffer) -> Result<(u64, u64), &'static str> {
-    let (first, end) = match buf {
-        Buffer::Span(pos) => (pos.first, pos.end),
-        _ => { return Err("error"); }
-    };
-    Ok((first, end))
-}
-
-fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i32, i32) {
-    let search_array_nodes = search_path[..idx + 1].iter().filter(|x| x.starts_with("[")).count() as i32;
-    let search_obj_nodes = idx as i32 + 1 - search_array_nodes;
-    (
-        idx as i32,
-        search_array_nodes - 1,
-        search_obj_nodes - 1
-    )
-}
-
-fn sanitize_output(out: &str) -> String {
-    let sanitized = out.trim().trim_start_matches("\"").trim_end_matches("\"");
-    if sanitized.starts_with(&['{', '[']) {
-        let json: Value = serde_json::from_str(sanitized).expect("JSON parsing error");
-        return json.to_string();
-    }
-    sanitized.to_string()
-}
 
 pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'static str> {
     // println!("--- Searching for {} on path: {:?}", haystack, search_path);
@@ -170,22 +142,6 @@ pub fn search(haystack: &str, search_path: &Vec<String>) -> Result<String, &'sta
 mod tests {
     use super::*;
     use crate::utils::parse_search_key;
-
-    #[test]
-    fn checkpoint_depth_test() {
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 0), (0, -1, 0));
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 1), (1, -1, 1));
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 2), (2, 0, 1));
-
-        assert_eq!(checkpoint_depth(&parse_search_key("[2]".to_string()), 0), (0, 0, -1));
-
-        assert_eq!(checkpoint_depth(&vec!["a".to_string()], 0), (0, -1, 0));
-
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 0), (0, 0, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 1), (1, 1, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 2), (2, 2, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 3), (3, 2, 0));
-    }
 
     #[test]
     fn array_only() {
