@@ -53,8 +53,11 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
             return Err("result not found");
         }
 
-        // Find the last line break
-        let chunk_str = String::from_utf8(buffer.to_vec()).unwrap();
+        // Find the last line break (add one if last buffer read)
+        let mut chunk_str = String::from_utf8(buffer.to_vec()).unwrap();
+        if bytes_read < chunk_size {
+            chunk_str.push('\n');
+        }
         if let Some(last_chunk_tup) = chunk_str.rsplit_once("\n") {
             let last_chunk = last_chunk_tup.0;
             debug!("last_chunk: {}", last_chunk);
