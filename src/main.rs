@@ -13,13 +13,16 @@ struct Args {
     file: Option<String>,
 
     #[arg(short, long)]
+    buffsize: Option<usize>,
+
+    #[arg(short, long)]
     path: String,
 }
 
 fn main() {
     let args = Args::parse();
     if args.file.is_some() {
-        match search(None, Some(args.file.unwrap().as_str()), args.path.as_str()) {
+        match search(None, Some(args.file.unwrap().as_str()), args.path.as_str(), args.buffsize) {
             Ok(result) => println!("{}", result),
             Err(error) => panic!("{}", error),
         }
@@ -32,7 +35,7 @@ fn main() {
             buffer
         };
         if !haystack.is_empty() {
-            match search(Some(haystack.as_str()), None, args.path.as_str()) {
+            match search(Some(haystack.as_str()), None, args.path.as_str(), None) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }

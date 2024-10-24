@@ -7,7 +7,7 @@ mod parse_all;
 mod utils;
 mod buf_parser;
 
-pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str) -> Result<String, &'static str> {
+pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str, buff_size: Option<usize>) -> Result<String, &'static str> {
     if (haystack.is_none() && file.is_none()) || search_key.is_empty() {
         return Err("Invalid input - no object found");
     }
@@ -21,7 +21,7 @@ pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str) -> R
         let f = File::open(file.unwrap()).unwrap();
         let mut reader = BufReader::new(&f);
         let mut seeker = BufReader::new(&f);
-        buf_parser::search(&mut reader, &mut seeker, &search_path)
+        buf_parser::search(&mut reader, &mut seeker, &search_path, buff_size)
     } else {
         let haystack_str = haystack.unwrap();
         if haystack_str.is_empty() {
@@ -29,7 +29,7 @@ pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str) -> R
         }
         let mut reader = Cursor::new(haystack_str.as_bytes());
         let mut seeker = Cursor::new(haystack_str.as_bytes());
-        buf_parser::search(&mut reader, &mut seeker, &search_path)
+        buf_parser::search(&mut reader, &mut seeker, &search_path, buff_size)
     }
 }
 
