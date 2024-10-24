@@ -1,3 +1,8 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Seek};
+use bgzip::BGZFReader;
+use bgzip::read::IndexedBGZFReader;
+use flate2::read::GzDecoder;
 use json_tools::Buffer;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -51,6 +56,25 @@ pub(crate) fn sanitize_output(out: &str) -> String {
         return json.to_string();
     }
     sanitized.to_string()
+}
+
+pub(crate) fn is_gz(file: &str) -> bool {
+    let mut buf = [0u8; 2];
+    let f = File::open(file).unwrap();
+    let mut reader = BufReader::new(f);
+    reader.read_exact(&mut buf).unwrap();
+    (buf[0] == 0x1f) && (buf[1] == 0x8b)
+}
+
+pub type BoxedReader = Box<dyn ReadSeek>;
+pub trait ReadSeek: Read + Seek + BufRead {}
+impl<T: Read + Seek + BufRead> ReadSeek for T {}
+pub(crate) fn get_reader(file: &str) -> BoxedReader {
+    if is_gz(file) {
+        Box::new(IndexedBGZFReader::new(BGZFReader::new(File::open(file).unwrap()).unwrap(), Default::default()).unwrap())
+    } else {
+        Box::new(BufReader::new(File::open(file).unwrap()))
+    }
 }
 
 #[cfg(test)]

@@ -1,11 +1,12 @@
 use std::fs::File;
 use std::io::{BufReader, Cursor};
-use crate::utils::parse_search_key;
+use crate::utils::{get_reader, parse_search_key};
 
 mod parse_top_level;
 mod parse_all;
 mod utils;
 mod buf_parser;
+mod gzip_poc;
 
 pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str, buff_size: Option<usize>) -> Result<String, &'static str> {
     if (haystack.is_none() && file.is_none()) || search_key.is_empty() {
@@ -19,9 +20,8 @@ pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str, buff
 
 fn top_level_buf_search(haystack: Option<&str>, file: Option<&str>, search_path: &Vec<String>, buff_size: Option<usize>) -> Result<String, &'static str> {
     if file.is_some() {
-        let f = File::open(file.unwrap()).unwrap();
-        let mut reader = BufReader::new(&f);
-        let mut seeker = BufReader::new(&f);
+        let mut reader = get_reader(file.unwrap());
+        let mut seeker = get_reader(file.unwrap());
         buf_parser::search(&mut reader, &mut seeker, search_path, buff_size)
     } else {
         let haystack_str = haystack.unwrap();

@@ -2,6 +2,7 @@ use clap::Parser;
 use jist::search;
 use std::io;
 use std::io::Read;
+use log::log_enabled;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -20,6 +21,7 @@ struct Args {
 }
 
 fn main() {
+    env_logger::init();
     let args = Args::parse();
     if args.file.is_some() {
         match search(None, Some(args.file.unwrap().as_str()), args.path.as_str(), args.buffsize) {
