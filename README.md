@@ -74,4 +74,4 @@ $ wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | j
 - [x] Streaming the JSON input should be possible, though will not be part of the starting design
 - [ ] Feature: generate JSON schema, like super fast
 - [ ] Search over compressed files like `gzip` and `bgzip`
-- [ ] SIMD?
+- [ ] SIMD: the final frontier?
