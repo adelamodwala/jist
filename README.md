@@ -64,6 +64,7 @@ $ wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | j
 ```
 
 # Algorithm
+`jist` uses a streaming approach to keep memory usage low, and uses `json-tools` crate to get a lexer iterator. Put together, we can scan through a JSON string/file from the top and keep track of depths compared to our target depth without ever unmarshalling JSON into memory. Once we reach our target depth and match all the expected indices/keys, `jist` returns the result.  
 
 ## Goals
 
