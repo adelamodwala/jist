@@ -4,11 +4,11 @@
 
 ## `jq` vs `jist`
 
-| 3.3GB input       |             jist             |       jq        |
-|:------------------|:----------------------------:|:---------------:|
-| Time              |            10.21             |      34.17      |
-| Memory            |            `8MB`             | `18GB` :scream: |
-| Throughput        | `0.3GBps` :white_check_mark: |    `0.1GBps`    |
+| 3.3GB input       |            jist             |       jq       |
+|:------------------|:---------------------------:|:--------------:|
+| Time              |            10.21            |     34.17      |
+| Memory            |            `8MB`            | `18GB`:scream: |
+| Throughput        | `0.3GBps`:white_check_mark: |   `0.1GBps`    |
 _(Test machine: Intel i7-12700H, 64GB DDR5@4800MT RAM)_
 ![](jist_vs_jq.png)
 
