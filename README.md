@@ -1,11 +1,18 @@
 # Overview
 
-`jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key:
+`jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key.
 
-![demo](demo.gif)
+## `jq` vs `jist`
 
-Or
+| 3.3GB input       |             jist             |       jq        |
+|:------------------|:----------------------------:|:---------------:|
+| Time              |            10.21             |      34.17      |
+| Memory            |            `8MB`             | `18GB` :scream: |
+| Throughput        | `0.3GBps` :white_check_mark: |    `0.1GBps`    |
+_(Test machine: Intel i7-12700H, 64GB DDR5@4800MT RAM)_
+![](jist_vs_jq.png)
 
+## Examples
 ```
 $ jist --data '{"a":"b", "c": {"d": ["e", "f", "g"]}}' --path "c.d"
 ["e", "f", "g"]
@@ -15,6 +22,12 @@ Or
 
 ```
 $ jist -d '[{"a": "b"}, {"c": {"d": "e"}}]' -p "[1].c"
+{"d": "e"}
+```
+
+Or
+```
+$ jist -f my.json -p "[1054041].c" --buffsize 50000000
 {"d": "e"}
 ```
 
@@ -54,7 +67,10 @@ $ wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | j
 ## Goals
 
 - [x] It should find the full JSON value of a given search key. If the JSON data supplied provides an incomplete JSON value, the program should return an error.
-- [ ] JSON object size should not impact number of operations to get result for a given search key, though it will affect speed and memory usage.
-- [ ] As long as the search key is appropriate and a complete JSON value can be found, the input JSON object does not need to be complete or correctly formed.
-- [ ] Parsing the entire input JSON object is not necessary, simply finding the search key path using JSON format is sufficient
-- [ ] Streaming the JSON input should be possible, though will not be part of the starting design
+- [x] JSON object size should not impact memory usage while fully utilizing a single CPU core 
+- [x] As long as the search key is appropriate and a complete JSON value can be found, the input JSON object does not need to be complete or correctly formed.
+- [x] Parsing the entire input JSON object is not necessary, simply finding the search key path using JSON format is sufficient
+- [x] Streaming the JSON input should be possible, though will not be part of the starting design
+- [ ] Feature: generate JSON schema, like super fast
+- [ ] Search over compressed files like `gzip` and `bgzip`
+- [ ] SIMD?
