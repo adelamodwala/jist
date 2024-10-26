@@ -2,7 +2,7 @@
 
 `jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key.
 
-## `jq` vs `jist`
+## `jq`?
 
 | 3.3GB input       |            jist             |       jq       |
 |:------------------|:---------------------------:|:--------------:|
