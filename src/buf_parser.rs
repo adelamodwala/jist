@@ -38,7 +38,7 @@ struct JStructTracker {
     arr_tgt_size: usize,
 }
 impl JStructTracker {
-    fn new(search_path: &Vec<String>) -> JStructTracker {
+    fn new(search_path: &[String]) -> JStructTracker {
         let mut struct_tracker = JStructTracker {
             depth_curr: (-1, -1, -1),
             arr_idx: Vec::new(),
@@ -64,7 +64,7 @@ impl JStructTracker {
         struct_tracker.arr_tgt_size = struct_tracker.arr_tgt.len();
         struct_tracker.search_keys = search_path.iter()
             .filter(|x| !x.starts_with("["))
-            .map(|x| x.clone())
+            .cloned()
             .rev()
             .collect::<Vec<String>>();
         debug!("checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}", struct_tracker.checkpoints, struct_tracker.arr_tgt, struct_tracker.search_keys);
@@ -79,8 +79,8 @@ fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<Strin
     String::from_utf8(buff.to_vec()).ok()
 }
 
-pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, search_path: &Vec<String>, buff_size: Option<usize>) -> Result<String, &'static str> {
-    let chunk_size = if buff_size.is_some() {buff_size.unwrap()} else { 1000000 };
+pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, search_path: &[String], buff_size: Option<usize>) -> Result<String, &'static str> {
+    let chunk_size = buff_size.unwrap_or(1_000_000);
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::new(search_path);
 
@@ -186,12 +186,12 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
                                 }
                             }
                             struct_t.last_token_key_delimiter = false;
-                        } else if (token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma) && struct_t.search_keys.len() > 0 {
+                        } else if (token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma) && !struct_t.search_keys.is_empty() {
                             if token.kind == TokenType::CurlyOpen {
                                 debug!("\\checkpoint started\\");
                             }
                             struct_t.last_token_key_delimiter = true;
-                        } else if struct_t.search_keys.len() == 0 && struct_t.checkpoints.len() == 1 {
+                        } else if struct_t.search_keys.is_empty() && struct_t.checkpoints.len() == 1 {
                             let (first, end) = token_pos(&token.buf)?;
                             match token.kind {
                                 TokenType::String | TokenType::Number | TokenType::BooleanFalse | TokenType::BooleanTrue | TokenType::Null => {
@@ -212,7 +212,7 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
                     }
                 }
 
-                if !token_iter.peek().is_some() {
+                if token_iter.peek().is_none() {
                     break;
                 }
             }

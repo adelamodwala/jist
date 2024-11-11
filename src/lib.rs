@@ -1,9 +1,7 @@
+use crate::utils::parse_search_key;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
-use crate::utils::parse_search_key;
 
-mod parse_top_level;
-mod parse_all;
 mod utils;
 mod buf_parser;
 
@@ -17,7 +15,7 @@ pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str, buff
     top_level_buf_search(haystack, file, &search_path, buff_size)
 }
 
-fn top_level_buf_search(haystack: Option<&str>, file: Option<&str>, search_path: &Vec<String>, buff_size: Option<usize>) -> Result<String, &'static str> {
+fn top_level_buf_search(haystack: Option<&str>, file: Option<&str>, search_path: &[String], buff_size: Option<usize>) -> Result<String, &'static str> {
     if file.is_some() {
         let f = File::open(file.unwrap()).unwrap();
         let mut reader = BufReader::new(&f);
@@ -32,14 +30,6 @@ fn top_level_buf_search(haystack: Option<&str>, file: Option<&str>, search_path:
         let mut seeker = Cursor::new(haystack_str.as_bytes());
         buf_parser::search(&mut reader, &mut seeker, search_path, buff_size)
     }
-}
-
-fn full_parse_search(haystack: Option<&str>, search_path: &Vec<String>) -> Result<String, &'static str> {
-    parse_all::search(haystack.unwrap(), &search_path)
-}
-
-fn top_level_mem_parse_search(haystack: Option<&str>, search_path: &Vec<String>) -> Result<String, &'static str> {
-    parse_top_level::search(haystack.unwrap(), &search_path)
 }
 
 #[cfg(test)]

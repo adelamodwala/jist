@@ -34,7 +34,7 @@ pub(crate) fn token_pos(buf: &Buffer) -> Result<(u64, u64), &'static str> {
     Ok((first, end))
 }
 
-pub(crate) fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i32, i32) {
+pub(crate) fn checkpoint_depth(search_path: &[String], idx: usize) -> (i32, i32, i32) {
     let search_array_nodes = search_path[..idx + 1].iter().filter(|x| x.starts_with("[")).count() as i32;
     let search_obj_nodes = idx as i32 + 1 - search_array_nodes;
     (
@@ -46,7 +46,7 @@ pub(crate) fn checkpoint_depth(search_path: &Vec<String>, idx: usize) -> (i32, i
 
 pub(crate) fn sanitize_output(out: &str) -> String {
     let sanitized = out.trim().trim_start_matches("\"").trim_end_matches("\"");
-    if sanitized.starts_with(&['{', '[']) {
+    if sanitized.starts_with(['{', '[']) {
         let json: Value = serde_json::from_str(sanitized).expect("JSON parsing error");
         return json.to_string();
     }
