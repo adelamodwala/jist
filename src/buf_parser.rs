@@ -52,22 +52,29 @@ impl JStructTracker {
         };
 
         for search_idx in 0..search_path.len() {
-            struct_tracker.checkpoints.push(checkpoint_depth(search_path, search_idx))
+            struct_tracker
+                .checkpoints
+                .push(checkpoint_depth(search_path, search_idx));
         }
         struct_tracker.checkpoints.reverse();
 
-        struct_tracker.arr_tgt = search_path.iter()
-            .filter(|x| x.starts_with("["))
-            .map(|x| array_ind(x.clone()))
+        struct_tracker.arr_tgt = search_path
+            .iter()
+            .filter(|x| x.starts_with('['))
+            .map(|x| array_ind(x.as_str()))
             .rev()
             .collect();
         struct_tracker.arr_tgt_size = struct_tracker.arr_tgt.len();
-        struct_tracker.search_keys = search_path.iter()
-            .filter(|x| !x.starts_with("["))
+        struct_tracker.search_keys = search_path
+            .iter()
+            .filter(|x| !x.starts_with('['))
             .cloned()
             .rev()
             .collect::<Vec<String>>();
-        debug!("checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}", struct_tracker.checkpoints, struct_tracker.arr_tgt, struct_tracker.search_keys);
+        debug!(
+            "checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}",
+            struct_tracker.checkpoints, struct_tracker.arr_tgt, struct_tracker.search_keys
+        );
         struct_tracker
     }
 }
@@ -76,26 +83,35 @@ fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<Strin
     let mut buff = vec![0u8; end as usize - start as usize];
     seeker.seek(SeekFrom::Start(start)).expect("error");
     seeker.read_exact(&mut buff).expect("error");
-    String::from_utf8(buff.to_vec()).ok()
+    String::from_utf8(buff.clone()).ok()
 }
 
-pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, search_path: &[String], buff_size: Option<usize>) -> Result<String, &'static str> {
+pub(crate) fn search<R: Read + Seek + BufRead>(
+    mut reader: R,
+    mut seeker: R,
+    search_path: &[String],
+    buff_size: Option<usize>,
+) -> Result<String, &'static str> {
     let chunk_size = buff_size.unwrap_or(1_000_000);
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::new(search_path);
 
     loop {
-        let bytes_read = reader.by_ref().take(chunk_size as u64).read_to_end(&mut stream_t.buffer).unwrap();
+        let bytes_read = reader
+            .by_ref()
+            .take(chunk_size as u64)
+            .read_to_end(&mut stream_t.buffer)
+            .unwrap();
         if bytes_read == 0 && stream_t.buffer.is_empty() {
             return Err("result not found");
         }
 
         // Find the last line break (add one if last buffer read)
-        let mut chunk_str = String::from_utf8(stream_t.buffer.to_vec()).unwrap();
+        let mut chunk_str = String::from_utf8(stream_t.buffer.clone()).unwrap();
         if bytes_read < chunk_size {
             chunk_str.push('\n');
         }
-        if let Some(last_chunk_tup) = chunk_str.rsplit_once("\n") {
+        if let Some(last_chunk_tup) = chunk_str.rsplit_once('\n') {
             let last_chunk = last_chunk_tup.0;
             debug!("last_chunk: {}", last_chunk);
             // Process the chunk that ends with a newline
@@ -104,7 +120,7 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
             stream_t.last_chunk_len = stream_t.chunk.len();
 
             // Process chunk here
-            let mut token_iter = Lexer::new(stream_t.chunk.to_vec(), BufferType::Span).peekable();
+            let mut token_iter = Lexer::new(stream_t.chunk.clone(), BufferType::Span).peekable();
 
             loop {
                 let token_opt = token_iter.next();
@@ -149,22 +165,42 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
                 }
                 debug!("depth_curr: {:?}, arr_idx: {:?}, arr_tgt: {:?}, search_keys: {:?}, kind: {:?}, last_open: {:?}, checkpoints: {:?}, checkpoint_start: {:?}", struct_t.depth_curr, struct_t.arr_idx, struct_t.arr_tgt, struct_t.search_keys, &token.kind, struct_t.last_open, struct_t.checkpoints, struct_t.checkpoint_start);
 
-                if struct_t.depth_curr.cmp(&struct_t.checkpoints.last().unwrap()) == Ordering::Equal {
+                if struct_t
+                    .depth_curr
+                    .cmp(struct_t.checkpoints.last().unwrap())
+                    == Ordering::Equal
+                {
                     // check if inside an array and iterating to find the expected place
-                    if *struct_t.last_open.last().unwrap() == TokenType::BracketOpen && struct_t.arr_idx.last().unwrap().cmp(&struct_t.arr_tgt.last().unwrap()) == Ordering::Equal {
+                    if *struct_t.last_open.last().unwrap() == TokenType::BracketOpen
+                        && struct_t
+                            .arr_idx
+                            .last()
+                            .unwrap()
+                            .cmp(struct_t.arr_tgt.last().unwrap())
+                            == Ordering::Equal
+                    {
                         let (first, end) = token_pos(&token.buf)?;
 
                         // terminal point
-                        if struct_t.checkpoints.len() == 1 && struct_t.checkpoint_start.len() == struct_t.arr_tgt_size {
+                        if struct_t.checkpoints.len() == 1
+                            && struct_t.checkpoint_start.len() == struct_t.arr_tgt_size
+                        {
                             debug!("[checkpoint ended]");
 
                             // add 1 to starting index to exclude commas or brackets
-                            let result = find_str(&mut seeker, (struct_t.checkpoint_start.last().unwrap()) + 1, end + stream_t.last_stream_pos).unwrap();
+                            let result = find_str(
+                                &mut seeker,
+                                (struct_t.checkpoint_start.last().unwrap()) + 1,
+                                end + stream_t.last_stream_pos,
+                            )
+                            .unwrap();
                             return Ok(sanitize_output(result.as_str()));
                         } else {
                             debug!("[checkpoint started]");
 
-                            struct_t.checkpoint_start.push(first + stream_t.last_stream_pos);
+                            struct_t
+                                .checkpoint_start
+                                .push(first + stream_t.last_stream_pos);
                             if struct_t.arr_tgt.len() > 1 {
                                 struct_t.arr_tgt.pop();
                             }
@@ -176,8 +212,18 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
                     } else if *struct_t.last_open.last().unwrap() == TokenType::CurlyOpen {
                         if token.kind == TokenType::String && struct_t.last_token_key_delimiter {
                             let (first, end) = token_pos(&token.buf)?;
-                            let key = find_str(&mut seeker, first + stream_t.last_stream_pos, end + stream_t.last_stream_pos).unwrap();
-                            if key.trim_start_matches("\"").trim_end_matches("\"").cmp(&struct_t.search_keys.last().unwrap()) == Ordering::Equal {
+                            let key = find_str(
+                                &mut seeker,
+                                first + stream_t.last_stream_pos,
+                                end + stream_t.last_stream_pos,
+                            )
+                            .unwrap();
+                            if key
+                                .trim_start_matches('\"')
+                                .trim_end_matches('\"')
+                                .cmp(struct_t.search_keys.last().unwrap())
+                                == Ordering::Equal
+                            {
                                 debug!(">>>found next key: {:?}", key);
                                 struct_t.search_keys.pop();
 
@@ -186,23 +232,43 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
                                 }
                             }
                             struct_t.last_token_key_delimiter = false;
-                        } else if (token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma) && !struct_t.search_keys.is_empty() {
+                        } else if (token.kind == TokenType::CurlyOpen
+                            || token.kind == TokenType::Comma)
+                            && !struct_t.search_keys.is_empty()
+                        {
                             if token.kind == TokenType::CurlyOpen {
                                 debug!("\\checkpoint started\\");
                             }
                             struct_t.last_token_key_delimiter = true;
-                        } else if struct_t.search_keys.is_empty() && struct_t.checkpoints.len() == 1 {
+                        } else if struct_t.search_keys.is_empty() && struct_t.checkpoints.len() == 1
+                        {
                             let (first, end) = token_pos(&token.buf)?;
                             match token.kind {
-                                TokenType::String | TokenType::Number | TokenType::BooleanFalse | TokenType::BooleanTrue | TokenType::Null => {
-                                    let result = find_str(&mut seeker, first + stream_t.last_stream_pos, end + stream_t.last_stream_pos).unwrap();
+                                TokenType::String
+                                | TokenType::Number
+                                | TokenType::BooleanFalse
+                                | TokenType::BooleanTrue
+                                | TokenType::Null => {
+                                    let result = find_str(
+                                        &mut seeker,
+                                        first + stream_t.last_stream_pos,
+                                        end + stream_t.last_stream_pos,
+                                    )
+                                    .unwrap();
                                     return Ok(sanitize_output(result.as_str()));
                                 }
                                 TokenType::Colon => {
-                                    struct_t.checkpoint_start.push(first + stream_t.last_stream_pos);
+                                    struct_t
+                                        .checkpoint_start
+                                        .push(first + stream_t.last_stream_pos);
                                 }
                                 TokenType::CurlyClose | TokenType::BracketClose => {
-                                    let result = find_str(&mut seeker, struct_t.checkpoint_start.last().unwrap() + 1, end + stream_t.last_stream_pos).unwrap();
+                                    let result = find_str(
+                                        &mut seeker,
+                                        struct_t.checkpoint_start.last().unwrap() + 1,
+                                        end + stream_t.last_stream_pos,
+                                    )
+                                    .unwrap();
                                     return Ok(sanitize_output(result.as_str()));
                                 }
                                 _ => {}
@@ -220,12 +286,15 @@ pub(crate) fn search<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R, sea
             // Clear chunk for next iteration
             stream_t.chunk.clear();
             // Remove processed data from buffer
-            stream_t.buffer.drain(..last_chunk.len() + 1);
+            stream_t.buffer.drain(..=last_chunk.len());
         } else {
             return Err("result not found");
         }
 
         stream_t.last_stream_pos += stream_t.last_chunk_len as u64;
-        debug!("page finished - stream_position: {:?}", stream_t.last_stream_pos);
+        debug!(
+            "page finished - stream_position: {:?}",
+            stream_t.last_stream_pos
+        );
     }
 }

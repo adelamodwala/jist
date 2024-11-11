@@ -22,7 +22,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
     if args.file.is_some() {
-        match search(None, Some(args.file.unwrap().as_str()), args.path.as_str(), args.buffsize) {
+        match search(
+            None,
+            Some(args.file.unwrap().as_str()),
+            args.path.as_str(),
+            args.buffsize,
+        ) {
             Ok(result) => println!("{}", result),
             Err(error) => panic!("{}", error),
         }
@@ -31,7 +36,9 @@ fn main() {
             text
         } else {
             let mut buffer = String::new();
-            io::stdin().read_to_string(&mut buffer).expect("data not provided");
+            io::stdin()
+                .read_to_string(&mut buffer)
+                .expect("data not provided");
             buffer
         };
         if !haystack.is_empty() {

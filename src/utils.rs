@@ -8,8 +8,8 @@ lazy_static! {
     static ref SPLIT_JSON_PATH_REGEX: Regex = Regex::new(r"\[(?:[^\[\]]*)\]|[^.\[\]]+").unwrap();
 }
 
-pub(crate) fn array_ind(accessor: String) -> i64 {
-    if !ARRAY_REGEX.is_match(accessor.as_str()) {
+pub(crate) fn array_ind(accessor: &str) -> i64 {
+    if !ARRAY_REGEX.is_match(accessor) {
         return -1;
     }
 
@@ -20,8 +20,9 @@ pub(crate) fn array_ind(accessor: String) -> i64 {
     val
 }
 
-pub(crate) fn parse_search_key(search_key: String) -> Vec<String> {
-    SPLIT_JSON_PATH_REGEX.find_iter(search_key.as_str())
+pub(crate) fn parse_search_key(search_key: &str) -> Vec<String> {
+    SPLIT_JSON_PATH_REGEX
+        .find_iter(search_key)
         .map(|m| m.as_str().to_string())
         .collect()
 }
@@ -29,19 +30,20 @@ pub(crate) fn parse_search_key(search_key: String) -> Vec<String> {
 pub(crate) fn token_pos(buf: &Buffer) -> Result<(u64, u64), &'static str> {
     let (first, end) = match buf {
         Buffer::Span(pos) => (pos.first, pos.end),
-        _ => { return Err("error"); }
+        _ => {
+            return Err("error");
+        }
     };
     Ok((first, end))
 }
 
 pub(crate) fn checkpoint_depth(search_path: &[String], idx: usize) -> (i32, i32, i32) {
-    let search_array_nodes = search_path[..idx + 1].iter().filter(|x| x.starts_with("[")).count() as i32;
+    let search_array_nodes = search_path[..idx + 1]
+        .iter()
+        .filter(|x| x.starts_with("["))
+        .count() as i32;
     let search_obj_nodes = idx as i32 + 1 - search_array_nodes;
-    (
-        idx as i32,
-        search_array_nodes - 1,
-        search_obj_nodes - 1
-    )
+    (idx as i32, search_array_nodes - 1, search_obj_nodes - 1)
 }
 
 pub(crate) fn sanitize_output(out: &str) -> String {
@@ -58,37 +60,85 @@ mod tests {
     use super::*;
     #[test]
     fn array_ind_test() {
-        assert_eq!(array_ind("0".to_string()), -1);
-        assert_eq!(array_ind("waef".to_string()), -1);
-        assert_eq!(array_ind("[11]".to_string()), 11);
+        assert_eq!(array_ind("0"), -1);
+        assert_eq!(array_ind("waef"), -1);
+        assert_eq!(array_ind("[11]"), 11);
     }
 
     #[test]
     fn parse_search_key_test() {
-        assert_eq!(parse_search_key("myroot".to_string()), vec!["myroot"]);
-        assert_eq!(parse_search_key("myroot.child1".to_string()), vec!["myroot", "child1"]);
-        assert_eq!(parse_search_key("myroot.child1.grandchild1".to_string()), vec!["myroot", "child1", "grandchild1"]);
-        assert_eq!(parse_search_key("myroot.child1[0]".to_string()), vec!["myroot", "child1", "[0]"]);
-        assert_eq!(parse_search_key("myroot.child1[0].arr1".to_string()), vec!["myroot", "child1", "[0]", "arr1"]);
-        assert_eq!(parse_search_key("[2].child1[0].arr1".to_string()), vec!["[2]", "child1", "[0]", "arr1"]);
-        assert_eq!(parse_search_key("[1][1][1].b".to_string()), vec!["[1]", "[1]", "[1]", "b"]);
-        assert_eq!(parse_search_key("x.y[1][1][1].b".to_string()), vec!["x", "y","[1]", "[1]", "[1]", "b"]);
-        assert_eq!(parse_search_key("x.y[1][1][1].b[1222][439834]".to_string()), vec!["x", "y","[1]", "[1]", "[1]", "b", "[1222]", "[439834]"]);
+        assert_eq!(parse_search_key("myroot"), vec!["myroot"]);
+        assert_eq!(
+            parse_search_key("myroot.child1"),
+            vec!["myroot", "child1"]
+        );
+        assert_eq!(
+            parse_search_key("myroot.child1.grandchild1"),
+            vec!["myroot", "child1", "grandchild1"]
+        );
+        assert_eq!(
+            parse_search_key("myroot.child1[0]"),
+            vec!["myroot", "child1", "[0]"]
+        );
+        assert_eq!(
+            parse_search_key("myroot.child1[0].arr1"),
+            vec!["myroot", "child1", "[0]", "arr1"]
+        );
+        assert_eq!(
+            parse_search_key("[2].child1[0].arr1"),
+            vec!["[2]", "child1", "[0]", "arr1"]
+        );
+        assert_eq!(
+            parse_search_key("[1][1][1].b"),
+            vec!["[1]", "[1]", "[1]", "b"]
+        );
+        assert_eq!(
+            parse_search_key("x.y[1][1][1].b"),
+            vec!["x", "y", "[1]", "[1]", "[1]", "b"]
+        );
+        assert_eq!(
+            parse_search_key("x.y[1][1][1].b[1222][439834]"),
+            vec!["x", "y", "[1]", "[1]", "[1]", "b", "[1222]", "[439834]"]
+        );
     }
 
     #[test]
     fn checkpoint_depth_test() {
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 0), (0, -1, 0));
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 1), (1, -1, 1));
-        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]".to_string()), 2), (2, 0, 1));
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("a.b[1]"), 0),
+            (0, -1, 0)
+        );
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("a.b[1]"), 1),
+            (1, -1, 1)
+        );
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("a.b[1]"), 2),
+            (2, 0, 1)
+        );
 
-        assert_eq!(checkpoint_depth(&parse_search_key("[2]".to_string()), 0), (0, 0, -1));
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("[2]"), 0),
+            (0, 0, -1)
+        );
 
         assert_eq!(checkpoint_depth(&vec!["a".to_string()], 0), (0, -1, 0));
 
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 0), (0, 0, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 1), (1, 1, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 2), (2, 2, -1));
-        assert_eq!(checkpoint_depth(&parse_search_key("[1][1][1].b".to_string()), 3), (3, 2, 0));
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("[1][1][1].b"), 0),
+            (0, 0, -1)
+        );
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("[1][1][1].b"), 1),
+            (1, 1, -1)
+        );
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("[1][1][1].b"), 2),
+            (2, 2, -1)
+        );
+        assert_eq!(
+            checkpoint_depth(&parse_search_key("[1][1][1].b"), 3),
+            (3, 2, 0)
+        );
     }
 }
