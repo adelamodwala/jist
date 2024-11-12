@@ -4,3 +4,5 @@
 /.idea/vcs.xml
 /.idea/
 /json_test
+/benchmarking/generator/*.json
+/benchmarking/generator/target/

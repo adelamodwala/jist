@@ -68,10 +68,7 @@ mod tests {
     #[test]
     fn parse_search_key_test() {
         assert_eq!(parse_search_key("myroot"), vec!["myroot"]);
-        assert_eq!(
-            parse_search_key("myroot.child1"),
-            vec!["myroot", "child1"]
-        );
+        assert_eq!(parse_search_key("myroot.child1"), vec!["myroot", "child1"]);
         assert_eq!(
             parse_search_key("myroot.child1.grandchild1"),
             vec!["myroot", "child1", "grandchild1"]
@@ -104,23 +101,11 @@ mod tests {
 
     #[test]
     fn checkpoint_depth_test() {
-        assert_eq!(
-            checkpoint_depth(&parse_search_key("a.b[1]"), 0),
-            (0, -1, 0)
-        );
-        assert_eq!(
-            checkpoint_depth(&parse_search_key("a.b[1]"), 1),
-            (1, -1, 1)
-        );
-        assert_eq!(
-            checkpoint_depth(&parse_search_key("a.b[1]"), 2),
-            (2, 0, 1)
-        );
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]"), 0), (0, -1, 0));
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]"), 1), (1, -1, 1));
+        assert_eq!(checkpoint_depth(&parse_search_key("a.b[1]"), 2), (2, 0, 1));
 
-        assert_eq!(
-            checkpoint_depth(&parse_search_key("[2]"), 0),
-            (0, 0, -1)
-        );
+        assert_eq!(checkpoint_depth(&parse_search_key("[2]"), 0), (0, 0, -1));
 
         assert_eq!(checkpoint_depth(&vec!["a".to_string()], 0), (0, -1, 0));
 
