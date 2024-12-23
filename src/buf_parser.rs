@@ -4,14 +4,14 @@ use log::debug;
 use std::cmp::Ordering;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 
-struct StreamTracker {
-    last_stream_pos: u64,
-    last_chunk_len: usize,
-    buffer: Vec<u8>,
-    chunk: Vec<u8>,
+pub struct StreamTracker {
+    pub last_stream_pos: u64,
+    pub last_chunk_len: usize,
+    pub buffer: Vec<u8>,
+    pub chunk: Vec<u8>,
 }
 impl StreamTracker {
-    fn new(chunk_size: usize) -> StreamTracker {
+    pub fn new(chunk_size: usize) -> StreamTracker {
         StreamTracker {
             last_stream_pos: 0,
             last_chunk_len: 0,

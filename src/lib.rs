@@ -4,6 +4,7 @@ use std::io::{BufReader, Cursor};
 
 mod buf_parser;
 mod utils;
+mod split_parser;
 
 pub fn search(
     haystack: Option<&str>,

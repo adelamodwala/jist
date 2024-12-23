@@ -111,7 +111,7 @@ fn main() {
     println!("All threads completed, combining shards...");
 
     // Combine shards into final output
-    let output_file = File::create("output.json").unwrap();
+    let output_file = File::create("../output.json").unwrap();
     let mut writer = BufWriter::new(output_file);
     writer.write_all(b"[\n").unwrap();
 
