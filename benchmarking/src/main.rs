@@ -22,7 +22,7 @@ const BATCH_SIZE: usize = 1_000_000;
 
 fn main() {
     let start_time = Instant::now();
-    let num_objects = 100_000_000;
+    let num_objects = 20;
     let num_threads = available_parallelism().unwrap().get();
     let objects_per_thread = num_objects / num_threads;
 

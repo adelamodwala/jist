@@ -1,10 +1,11 @@
 use crate::utils::parse_search_key;
 use std::fs::File;
-use std::io::{BufReader, Cursor};
+use std::io::{BufReader, Cursor, Read};
 
 mod buf_parser;
 mod utils;
 mod split_parser;
+mod simd_parser;
 
 pub fn search(
     haystack: Option<&str>,
@@ -18,7 +19,8 @@ pub fn search(
 
     let search_path = parse_search_key(search_key);
 
-    top_level_buf_search(haystack, file, &search_path, buff_size)
+    // top_level_buf_search(haystack, file, &search_path, buff_size)
+    simd_parser::search(haystack, file, search_key)
 }
 
 fn top_level_buf_search(
