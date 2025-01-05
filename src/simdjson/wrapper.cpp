@@ -3,7 +3,7 @@
 #include <fstream>
 #include <filesystem>
 
-std::string get_result(simdjson::simdjson_result<simdjson::fallback::ondemand::document> &doc, std::string path)
+std::string get_result(simdjson::simdjson_result<simdjson::ondemand::document> &doc, std::string path)
 {
     auto result = doc.at_path(path);
     std::ostringstream oss;
