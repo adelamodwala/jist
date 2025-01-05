@@ -4,6 +4,7 @@ use std::io::{BufWriter, Write};
 use std::sync::mpsc;
 use std::thread::{self, available_parallelism};
 use std::time::Instant;
+use clap::Parser;
 
 const JSON_TEMPLATE: &str = r#"    {
         "bar": {
@@ -20,10 +21,18 @@ const JSON_TEMPLATE: &str = r#"    {
 
 const BATCH_SIZE: usize = 1_000_000;
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    n: Option<usize>
+}
+
 fn main() {
+    let args = Args::parse();
     let start_time = Instant::now();
-    let num_objects = 12_000_000;
     let num_threads = available_parallelism().unwrap().get();
+    let num_objects = args.n.unwrap_or(num_threads);
     let objects_per_thread = num_objects / num_threads;
 
     println!("Generating {} objects using {} threads", num_objects, num_threads);

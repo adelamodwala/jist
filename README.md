@@ -4,11 +4,11 @@
 
 ## `jq`?
 
-| 3.3GB input       |   jist    |   jq    |
-|:------------------|:---------:|:-------:|
-| Time              |  10.21s   | 34.17s  |
-| Memory            |    8MB    | 18GB 😱 |
-| Throughput        | 300MB/s ✅ | 96MB/s  |
+| 3.3GB input       |    jist    |   jq    |
+|:------------------|:----------:|:-------:|
+| Time              |   2.05s    | 34.17s  |
+| Memory            |    8MB     | 18GB 😱 |
+| Throughput        | 1600MB/s ✅ | 96MB/s  |
 
 _(Test machine: Intel i7-12700H, 64GB DDR5@4800MT RAM)_
 ![](jist_vs_jq.png)
