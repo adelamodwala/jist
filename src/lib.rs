@@ -16,16 +16,28 @@ pub fn search(
     if (haystack.is_none() && file.is_none()) || search_key.is_empty() {
         return Err("Invalid input - no object found");
     }
+    if file.is_none() && haystack.unwrap().is_empty() {
+        return Err("Invalid input - empty data");
+    }
+    if haystack.is_none() && file.unwrap().is_empty() {
+        return Err("Invalid input - empty file path");
+    }
 
-    let search_path = parse_search_key(search_key);
+    // If input file size is greater than 4.2GB, fallback to buffered search
+    if file.is_some() {
+        let f = File::open(file.unwrap()).unwrap();
+        if f.metadata().unwrap().len() >= u32::MAX as u64 {
+            let search_path = parse_search_key(search_key);
+            return top_level_buf_search(haystack, file, &search_path, buff_size);
+        }
+    }
 
-    // top_level_buf_search(haystack, file, &search_path, buff_size)
     simd_parser::search(haystack, file, search_key)
 }
 
 fn top_level_buf_search(
     haystack: Option<&str>,
-    file: Option<&str>,
+    file: Option<&str>,     // Keep this as Option<&str> for future flexibility with testing & dev
     search_path: &[String],
     buff_size: Option<usize>,
 ) -> Result<String, &'static str> {
