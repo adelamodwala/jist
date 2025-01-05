@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::thread::{self, available_parallelism};
 use std::time::Instant;
 use clap::Parser;
+use humansize::{format_size, DECIMAL};
 
 const JSON_TEMPLATE: &str = r#"    {
         "bar": {
@@ -25,7 +26,10 @@ const BATCH_SIZE: usize = 1_000_000;
 #[command(version, about, long_about = None)]
 struct Args {
     #[arg(short, long)]
-    n: Option<usize>
+    n: Option<usize>,
+
+    #[arg(short, long)]
+    out: Option<String>,
 }
 
 fn main() {
@@ -120,8 +124,8 @@ fn main() {
     println!("All threads completed, combining shards...");
 
     // Combine shards into final output
-    let output_file = File::create("../output.json").unwrap();
-    let mut writer = BufWriter::new(output_file);
+    let output_file = File::create(args.out.unwrap_or("../output.json".to_string())).unwrap();
+    let mut writer = BufWriter::new(&output_file);
     writer.write_all(b"[\n").unwrap();
 
     // Use larger buffer for combining files
@@ -146,7 +150,8 @@ fn main() {
     writer.flush().unwrap();
 
     let duration = start_time.elapsed();
-    println!("Completed in {:.2?}", duration);
+    let file_size = (&output_file).metadata().unwrap().len();
+    println!("Completed in {:.2?}, file size: {}", duration, format_size(file_size, DECIMAL));
 }
 
 fn random_string(rng: &mut rand::rngs::ThreadRng, length: usize) -> String {
