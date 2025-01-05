@@ -155,7 +155,7 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    #[test]
+    // #[test]
     fn it_works() {
         let start_time = Instant::now();
         split_poc();

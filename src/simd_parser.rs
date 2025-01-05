@@ -19,6 +19,8 @@ pub fn search(haystack: Option<&str>, file: Option<&str>, search_key: &str) -> R
     };
 
     let result: String = ffi::value_at_path(haystack.unwrap_or(""), file.unwrap_or(""), search_key_global.as_str());
-
+    if !result.is_empty() && result.eq("JIST_ERROR_FILE_TOO_LARGE") {
+        return Err("JIST_ERROR_FILE_TOO_LARGE")
+    }
     Ok(sanitize_output(&result))
 }

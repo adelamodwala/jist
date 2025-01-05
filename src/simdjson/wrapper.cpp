@@ -38,6 +38,9 @@ rust::String value_at_path(rust::Str input_str, rust::Str file_name, rust::Str j
     }
     catch (const simdjson::simdjson_error &e)
     {
+        if (e.error() == simdjson::error_code::MEMALLOC || e.error() == simdjson::error_code::CAPACITY) {
+            return rust::String(std::string("JIST_ERROR_FILE_TOO_LARGE"));
+        }
         return rust::String(std::string("JSON error: ") + e.what());
     }
     catch (const std::exception &e)

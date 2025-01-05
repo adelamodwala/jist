@@ -23,29 +23,30 @@ pub fn search(
         return Err("Invalid input - empty file path");
     }
 
-    // If input file size is greater than 4.2GB, fallback to buffered search
-    if file.is_some() {
-        let f = File::open(file.unwrap()).unwrap();
-        if f.metadata().unwrap().len() >= u32::MAX as u64 {
-            let search_path = parse_search_key(search_key);
-            return top_level_buf_search(haystack, file, &search_path, buff_size);
+    match simd_parser::search(haystack, file, search_key) {
+        Ok(result) => Ok(result),
+        Err(code) => {
+            if code.eq("JIST_ERROR_FILE_TOO_LARGE") {
+                // println!("file too large - fallback to char lexer");
+                return top_level_buf_search(haystack, file, search_key, buff_size);
+            }
+            Err(code)
         }
     }
-
-    simd_parser::search(haystack, file, search_key)
 }
 
 fn top_level_buf_search(
     haystack: Option<&str>,
     file: Option<&str>,     // Keep this as Option<&str> for future flexibility with testing & dev
-    search_path: &[String],
+    search_key: &str,
     buff_size: Option<usize>,
 ) -> Result<String, &'static str> {
+    let search_path = parse_search_key(search_key);
     if file.is_some() {
         let f = File::open(file.unwrap()).unwrap();
         let mut reader = BufReader::new(&f);
         let mut seeker = BufReader::new(&f);
-        buf_parser::search(&mut reader, &mut seeker, search_path, buff_size)
+        buf_parser::search(&mut reader, &mut seeker, &search_path, buff_size)
     } else {
         let haystack_str = haystack.unwrap();
         if haystack_str.is_empty() {
@@ -53,7 +54,7 @@ fn top_level_buf_search(
         }
         let mut reader = Cursor::new(haystack_str.as_bytes());
         let mut seeker = Cursor::new(haystack_str.as_bytes());
-        buf_parser::search(&mut reader, &mut seeker, search_path, buff_size)
+        buf_parser::search(&mut reader, &mut seeker, &search_path, buff_size)
     }
 }
 
