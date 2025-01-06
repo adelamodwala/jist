@@ -17,6 +17,9 @@ struct Args {
 
     #[arg(short, long)]
     path: String,
+
+    #[arg(short, long)]
+    streaming: bool,
 }
 
 fn main() {
@@ -27,6 +30,7 @@ fn main() {
             Some(args.file.unwrap().as_str()),
             args.path.as_str(),
             args.buffsize,
+            args.streaming,
         ) {
             Ok(result) => println!("{}", result),
             Err(error) => panic!("{}", error),
@@ -42,7 +46,7 @@ fn main() {
             buffer
         };
         if !haystack.is_empty() {
-            match search(Some(haystack.as_str()), None, args.path.as_str(), None) {
+            match search(Some(haystack.as_str()), None, args.path.as_str(), None, args.streaming) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }

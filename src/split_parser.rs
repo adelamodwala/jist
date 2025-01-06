@@ -160,11 +160,11 @@ mod tests {
         let start_time = Instant::now();
         split_poc();
         let elapsed = Instant::now().duration_since(start_time).as_millis();
-        println!("split_poc time: {:.2?}", elapsed);
+        debug!("split_poc time: {:.2?}", elapsed);
 
         let start_time = Instant::now();
         simple_poc();
         let elapsed = Instant::now().duration_since(start_time).as_millis();
-        println!("simple_poc time: {:.2?}", elapsed);
+        debug!("simple_poc time: {:.2?}", elapsed);
     }
 }
