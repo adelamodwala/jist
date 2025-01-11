@@ -1,17 +1,19 @@
 use crate::utils::{array_ind, checkpoint_depth, sanitize_output, token_pos};
+use crate::{buf_parser, utils};
 use json_tools::{BufferType, Lexer, TokenType};
 use log::debug;
 use std::cmp::Ordering;
-use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 
-struct StreamTracker {
-    last_stream_pos: u64,
-    last_chunk_len: usize,
-    buffer: Vec<u8>,
-    chunk: Vec<u8>,
+pub struct StreamTracker {
+    pub last_stream_pos: u64,
+    pub last_chunk_len: usize,
+    pub buffer: Vec<u8>,
+    pub chunk: Vec<u8>,
 }
 impl StreamTracker {
-    fn new(chunk_size: usize) -> StreamTracker {
+    pub fn new(chunk_size: usize) -> StreamTracker {
         StreamTracker {
             last_stream_pos: 0,
             last_chunk_len: 0,
@@ -86,13 +88,39 @@ fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<Strin
     String::from_utf8(buff.clone()).ok()
 }
 
-pub(crate) fn search<R: Read + Seek + BufRead>(
+pub fn search(
+    haystack: Option<&str>,
+    file: Option<&str>, // Keep this as Option<&str> for future flexibility with testing & dev
+    search_key: &str,
+) -> Result<String, &'static str> {
+    if search_key.is_empty() {
+        return Err("search_key is empty");
+    }
+    let search_path = utils::parse_search_key(search_key);
+    if file.is_some() {
+        let f = File::open(file.unwrap()).unwrap();
+        let mut reader = BufReader::new(&f);
+        let mut seeker = BufReader::new(&f);
+        _search(&mut reader, &mut seeker, &search_path)
+    } else if haystack.is_some() {
+        let haystack_str = haystack.unwrap();
+        if haystack_str.is_empty() {
+            return Err("Invalid input - empty data");
+        }
+        let mut reader = Cursor::new(haystack_str.as_bytes());
+        let mut seeker = Cursor::new(haystack_str.as_bytes());
+        _search(&mut reader, &mut seeker, &search_path)
+    } else {
+        Err("Invalid input - empty data")
+    }
+}
+
+pub fn _search<R: Read + Seek + BufRead>(
     mut reader: R,
     mut seeker: R,
     search_path: &[String],
-    buff_size: Option<usize>,
 ) -> Result<String, &'static str> {
-    let chunk_size = buff_size.unwrap_or(1_000_000);
+    let chunk_size = 1_000_000;
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::new(search_path);
 

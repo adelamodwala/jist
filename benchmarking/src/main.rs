@@ -4,6 +4,8 @@ use std::io::{BufWriter, Write};
 use std::sync::mpsc;
 use std::thread::{self, available_parallelism};
 use std::time::Instant;
+use clap::Parser;
+use humansize::{format_size, DECIMAL};
 
 const JSON_TEMPLATE: &str = r#"    {
         "bar": {
@@ -20,10 +22,21 @@ const JSON_TEMPLATE: &str = r#"    {
 
 const BATCH_SIZE: usize = 1_000_000;
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    n: Option<usize>,
+
+    #[arg(short, long)]
+    out: Option<String>,
+}
+
 fn main() {
+    let args = Args::parse();
     let start_time = Instant::now();
-    let num_objects = 100_000_000;
     let num_threads = available_parallelism().unwrap().get();
+    let num_objects = args.n.unwrap_or(num_threads);
     let objects_per_thread = num_objects / num_threads;
 
     println!("Generating {} objects using {} threads", num_objects, num_threads);
@@ -111,8 +124,8 @@ fn main() {
     println!("All threads completed, combining shards...");
 
     // Combine shards into final output
-    let output_file = File::create("output.json").unwrap();
-    let mut writer = BufWriter::new(output_file);
+    let output_file = File::create(args.out.unwrap_or("../output.json".to_string())).unwrap();
+    let mut writer = BufWriter::new(&output_file);
     writer.write_all(b"[\n").unwrap();
 
     // Use larger buffer for combining files
@@ -137,7 +150,8 @@ fn main() {
     writer.flush().unwrap();
 
     let duration = start_time.elapsed();
-    println!("Completed in {:.2?}", duration);
+    let file_size = (&output_file).metadata().unwrap().len();
+    println!("Completed in {:.2?}, file size: {}", duration, format_size(file_size, DECIMAL));
 }
 
 fn random_string(rng: &mut rand::rngs::ThreadRng, length: usize) -> String {

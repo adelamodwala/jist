@@ -2,6 +2,7 @@
 name = "jist"
 version = "0.1.0"
 edition = "2021"
+authors = ["Adel Amodwala <adel.amodwala@gmail.com>"]
 
 [dependencies]
 clap = { version = "4.5.17", features = ["derive"] }
@@ -10,3 +11,11 @@ lazy_static = "1.5.0"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 json-tools = "*"
 log = "0.4.22"
+md5 = "0.7.0"
+cxx = "1.0.136"
+autocxx = "0.27.0"
+
+[build-dependencies]
+autocxx-build = "0.27.0"
+miette = { version = "7.4.0", features = ["fancy"] }
+cc = { version = "1.0", features = ["parallel"] }
