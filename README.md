@@ -47,6 +47,9 @@ cd benchmarking
 cargo build --release # things will go way faster with release especially for really large files
 ./target/release/genearator -n 100000000 -o ../output.json 
 # n = number of records with the shape above - e.g. 100M records will result in a 28.9GB file
+cd ../ # go back to project root directory
+cargo build --release # (optional - build from source or use binary) again things will be much faster with release
+./target/release/jist -f output.json -p "[9999999].bar.baz"
 ```
 You can of course modify the shape of the data as well by updating `jist/benchmarking/src/main.rs`.
 
