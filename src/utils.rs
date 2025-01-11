@@ -20,7 +20,7 @@ pub(crate) fn array_ind(accessor: &str) -> i64 {
     val
 }
 
-pub(crate) fn parse_search_key(search_key: &str) -> Vec<String> {
+pub fn parse_search_key(search_key: &str) -> Vec<String> {
     SPLIT_JSON_PATH_REGEX
         .find_iter(search_key)
         .map(|m| m.as_str().to_string())

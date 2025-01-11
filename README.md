@@ -65,7 +65,7 @@ $ jist -d '[{"a": "b"}, {"c": {"d": "e"}}]' -p "[1].c"
 
 Or
 ```
-$ jist -f my.json -p "[1054041].c" --buffsize 50000000
+$ jist -f my.json -p "[1054041].c"
 {"d": "e"}
 ```
 

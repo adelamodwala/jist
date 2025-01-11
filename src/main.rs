@@ -1,5 +1,7 @@
 use clap::Parser;
-use jist::search;
+use jist::{buf_parser, simd_parser, utils};
+use log::debug;
+use std::fs::File;
 use std::io;
 use std::io::Read;
 
@@ -11,9 +13,6 @@ struct Args {
 
     #[arg(short, long)]
     file: Option<String>,
-
-    #[arg(short, long)]
-    buffsize: Option<usize>,
 
     #[arg(short, long)]
     path: String,
@@ -29,7 +28,6 @@ fn main() {
             None,
             Some(args.file.unwrap().as_str()),
             args.path.as_str(),
-            args.buffsize,
             args.streaming,
         ) {
             Ok(result) => println!("{}", result),
@@ -46,12 +44,59 @@ fn main() {
             buffer
         };
         if !haystack.is_empty() {
-            match search(Some(haystack.as_str()), None, args.path.as_str(), None, args.streaming) {
+            match search(
+                Some(haystack.as_str()),
+                None,
+                args.path.as_str(),
+                args.streaming,
+            ) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }
         } else {
             panic!("No data provided");
+        }
+    }
+}
+
+pub fn search(
+    haystack: Option<&str>,
+    file: Option<&str>,
+    search_key: &str,
+    streaming: bool,
+) -> Result<String, &'static str> {
+    if (haystack.is_none() && file.is_none()) || search_key.is_empty() {
+        return Err("Invalid input - no object found");
+    }
+    if file.is_none() && haystack.unwrap().is_empty() {
+        return Err("Invalid input - empty data");
+    }
+    if haystack.is_none() && file.unwrap().is_empty() {
+        return Err("Invalid input - empty file path");
+    }
+
+    // If input file size is greater than 4.2GB, fallback to buffered search
+    let mut stream_only = streaming;
+    if file.is_some() {
+        let f = File::open(file.unwrap()).unwrap();
+        if f.metadata().unwrap().len() >= u32::MAX as u64 {
+            debug!("file too large - fallback to char lexer");
+            stream_only = true;
+        }
+    }
+    if stream_only {
+        debug!("stream only");
+        return buf_parser::search(haystack, file, search_key);
+    }
+
+    match simd_parser::search(haystack, file, search_key) {
+        Ok(result) => Ok(result),
+        Err(code) => {
+            if code.eq("JIST_ERROR_FILE_TOO_LARGE") {
+                debug!("fallback to char lexer");
+                return buf_parser::search(haystack, file, search_key);
+            }
+            Err(code)
         }
     }
 }
