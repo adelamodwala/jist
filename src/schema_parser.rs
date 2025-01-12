@@ -81,7 +81,7 @@ mod tests {
         let haystack_str = r#"{"a":"b"}"#;
         let mut reader = Cursor::new(haystack_str.as_bytes());
         let mut seeker = Cursor::new(haystack_str.as_bytes());
-        simple_poc(reader, seeker);
+        simple_poc(&mut reader, &mut seeker);
         let elapsed = Instant::now().duration_since(start_time).as_millis();
         println!("simple_poc time: {:.2?}", elapsed);
     }
