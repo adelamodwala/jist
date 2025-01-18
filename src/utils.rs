@@ -2,6 +2,7 @@ use json_tools::Buffer;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde_json::Value;
+use std::io::{Read, Seek, SeekFrom};
 
 lazy_static! {
     static ref ARRAY_REGEX: Regex = Regex::new(r"^\[(\d+)\]$").unwrap();
@@ -53,6 +54,13 @@ pub(crate) fn sanitize_output(out: &str) -> String {
         return json.to_string();
     }
     sanitized.to_string()
+}
+
+pub fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<String> {
+    let mut buff = vec![0u8; end as usize - start as usize];
+    seeker.seek(SeekFrom::Start(start)).expect("error");
+    seeker.read_exact(&mut buff).expect("error");
+    String::from_utf8(buff.clone()).ok()
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ pub(crate) struct JStructTracker {
     // keep track of array indices if currently inside array
     pub arr_idx: Vec<i64>,
     pub last_open: Vec<TokenType>,
+    pub last_open_pin: Vec<(TokenType, u64)>,
     pub checkpoint_start: Vec<u64>,
     pub last_token_key_delimiter: bool,
 
@@ -25,6 +26,7 @@ impl JStructTracker {
             depth_curr: (-1, -1, -1),
             arr_idx: Vec::new(),
             last_open: Vec::new(),
+            last_open_pin: Vec::new(),
             checkpoint_start: Vec::new(),
             last_token_key_delimiter: false,
             checkpoints: Vec::new(),

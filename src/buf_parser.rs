@@ -1,4 +1,4 @@
-use crate::utils::{array_ind, checkpoint_depth, sanitize_output, token_pos};
+use crate::utils::{array_ind, checkpoint_depth, find_str, sanitize_output, token_pos};
 use crate::{buf_parser, utils};
 use json_tools::{BufferType, Lexer, TokenType};
 use log::debug;
@@ -7,13 +7,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 use crate::model::j_struct_tracker::JStructTracker;
 use crate::model::stream_tracker::StreamTracker;
-
-fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<String> {
-    let mut buff = vec![0u8; end as usize - start as usize];
-    seeker.seek(SeekFrom::Start(start)).expect("error");
-    seeker.read_exact(&mut buff).expect("error");
-    String::from_utf8(buff.clone()).ok()
-}
 
 pub fn search(
     haystack: Option<&str>,
@@ -85,7 +78,6 @@ pub fn _search<R: Read + Seek + BufRead>(
 
                 let mut token = token_opt.unwrap();
 
-                let arr_idx_len = struct_t.arr_idx.len();
                 match token.kind {
                     TokenType::CurlyOpen => {
                         struct_t.depth_curr.0 += 1;
@@ -113,6 +105,7 @@ pub fn _search<R: Read + Seek + BufRead>(
                         if struct_t.depth_curr.1 > -1                    // must be inside an array
                             && *struct_t.last_open.last().unwrap() == TokenType::BracketOpen
                         {
+                            let arr_idx_len = struct_t.arr_idx.len();
                             struct_t.arr_idx[arr_idx_len - 1] += 1;
                         }
                     }
