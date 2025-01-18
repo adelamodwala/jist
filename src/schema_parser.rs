@@ -6,11 +6,22 @@ use log::debug;
 use md5;
 use md5::Digest;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
+use std::iter::Map;
 use std::ops::Add;
 use std::path::absolute;
 use std::thread;
+
+fn add_sub_schema(sub_schemas: &mut HashMap<String, usize>, sub_schema: String) {
+    if sub_schemas.contains_key(&sub_schema) {
+        let count = sub_schemas.get(&sub_schema);
+        sub_schemas.insert(sub_schema.clone(), count.unwrap() + 1);
+    } else {
+        sub_schemas.insert(sub_schema.clone(), 1);
+    }
+}
 
 fn simple_poc<R: Read + Seek + BufRead>(
     mut reader: R,
@@ -20,6 +31,7 @@ fn simple_poc<R: Read + Seek + BufRead>(
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::init();
     let mut schema = String::new();
+    let mut sub_schemas: HashMap<String, usize> = HashMap::new();
 
     loop {
         let bytes_read = reader
@@ -59,14 +71,19 @@ fn simple_poc<R: Read + Seek + BufRead>(
                         struct_t.depth_curr.0 += 1;
                         struct_t.depth_curr.2 += 1;
                         let (first, end) = token_pos(&token.buf)?;
-                        struct_t.last_open_pin.push((TokenType::CurlyOpen, first));
+                        struct_t
+                            .last_open_pin
+                            .push((TokenType::CurlyOpen, first, schema.len()));
                         schema = schema + "{";
                     }
                     TokenType::CurlyClose => {
                         struct_t.depth_curr.0 -= 1;
                         struct_t.depth_curr.2 -= 1;
+                        schema = schema + "}";
 
-                        let last_curly_open = struct_t.last_open_pin.iter()
+                        let last_curly_open = struct_t
+                            .last_open_pin
+                            .iter()
                             .filter(|sym| sym.0 == TokenType::CurlyOpen)
                             .last();
                         if last_curly_open.is_none() {
@@ -75,24 +92,30 @@ fn simple_poc<R: Read + Seek + BufRead>(
                         let curly_open = last_curly_open.unwrap();
                         let (first, end) = token_pos(&token.buf)?;
                         let value = find_str(&mut seeker, curly_open.1, end);
-                        println!("{:?}", value.unwrap());
+                        let mut value_schema = String::new();
+                        value_schema.clone_from(&schema[curly_open.2..].to_string());
+                        add_sub_schema(&mut sub_schemas, value_schema);
 
                         struct_t.last_open_pin.pop();
-                        schema = schema + "}";
                     }
                     TokenType::BracketOpen => {
                         struct_t.depth_curr.0 += 1;
                         struct_t.depth_curr.1 += 1;
                         struct_t.arr_idx.push(0);
                         let (first, end) = token_pos(&token.buf)?;
-                        struct_t.last_open_pin.push((TokenType::BracketOpen, first));
+                        struct_t
+                            .last_open_pin
+                            .push((TokenType::BracketOpen, first, schema.len()));
                         schema = schema + "[";
                     }
                     TokenType::BracketClose => {
                         struct_t.depth_curr.0 -= 1;
                         struct_t.depth_curr.1 -= 1;
+                        schema = schema + "]";
 
-                        let last_bracket_open = struct_t.last_open_pin.iter()
+                        let last_bracket_open = struct_t
+                            .last_open_pin
+                            .iter()
                             .filter(|sym| sym.0 == TokenType::BracketOpen)
                             .last();
                         if last_bracket_open.is_none() {
@@ -101,14 +124,15 @@ fn simple_poc<R: Read + Seek + BufRead>(
                         let curly_open = last_bracket_open.unwrap();
                         let (first, end) = token_pos(&token.buf)?;
                         let value = find_str(&mut seeker, curly_open.1, end);
-                        println!("{:?}", value.unwrap());
+                        let mut value_schema = String::new();
+                        value_schema.clone_from(&schema[curly_open.2..].to_string());
+                        add_sub_schema(&mut sub_schemas, value_schema);
 
                         struct_t.arr_idx.pop();
                         struct_t.last_open_pin.pop();
-                        schema = schema + "]";
                     }
                     TokenType::Comma => {
-                        let (token_type, _) = struct_t.last_open_pin.last().unwrap();
+                        let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
                         if struct_t.depth_curr.1 > -1                    // must be inside an array
                             && token_type.eq(&TokenType::BracketOpen)
                         {
@@ -125,13 +149,12 @@ fn simple_poc<R: Read + Seek + BufRead>(
                 }
 
                 if !struct_t.last_open_pin.is_empty() {
-                    let (token_type, _) = struct_t.last_open_pin.last().unwrap();
+                    let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
                     if token_type.eq(&TokenType::BracketOpen) {
                         if token.kind == TokenType::String {
                             schema = schema + "string";
                         }
-                    } else if token_type.eq(&TokenType::CurlyOpen)
-                    {
+                    } else if token_type.eq(&TokenType::CurlyOpen) {
                         if token.kind == TokenType::String && struct_t.last_token_key_delimiter {
                             let (first, end) = token_pos(&token.buf)?;
                             let key = find_str(
@@ -139,7 +162,7 @@ fn simple_poc<R: Read + Seek + BufRead>(
                                 first + stream_t.last_stream_pos,
                                 end + stream_t.last_stream_pos,
                             )
-                                .unwrap();
+                            .unwrap();
                             schema = schema + &key;
                             struct_t.last_token_key_delimiter = false;
                         } else if token.kind == TokenType::String {
@@ -172,6 +195,8 @@ fn simple_poc<R: Read + Seek + BufRead>(
         stream_t.last_stream_pos += stream_t.last_chunk_len as u64;
     }
 
+    println!("{:?}", sub_schemas);
+
     Ok(schema)
 }
 
@@ -201,12 +226,15 @@ mod tests {
         );
 
         assert_eq!(
-            call(r#"{"a":"b", "c":"d", "e":[2,false,{"bob":{"f":"g"}}]}"#),
-            Ok(r#"{"a":string,"c":string,"e":[num,bool,{"bob":{"f":string}}]}"#.to_string())
+            call(r#"{"a":"b", "c":{"h":"i"}, "e":[2,false,{"bob":{"f":"g"}}]}"#),
+            Ok(r#"{"a":string,"c":{"h":string},"e":[num,bool,{"bob":{"f":string}}]}"#.to_string())
         );
 
         // test repeating patterns
-        assert_eq!(call(r#"[{"a":"b"},{"a":"d"}]"#), Ok(r#"[{"a":string},{"a":string}]"#.to_string()));
+        assert_eq!(
+            call(r#"[{"a":"b"},{"a":"d"}]"#),
+            Ok(r#"[{"a":string},{"a":string}]"#.to_string())
+        );
         assert_eq!(call(r#"[1,2,4]"#), Ok(r#"[num,num,num]"#.to_string()));
     }
 }
