@@ -1,18 +1,20 @@
-use json_tools::{BufferType, Lexer, Token};
+use crate::model::j_struct_tracker::JStructTracker;
+use crate::model::stream_tracker::StreamTracker;
+use crate::utils::token_pos;
+use json_tools::{BufferType, Lexer, Token, TokenType};
 use log::debug;
+use md5;
+use md5::Digest;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::absolute;
 use std::thread;
-use crate::utils::token_pos;
-use md5;
-use md5::Digest;
 
-fn simple_poc<R: Read + Seek + BufRead>(
-    mut reader: R,
-    mut seeker: R) {
+fn simple_poc<R: Read + Seek + BufRead>(mut reader: R, mut seeker: R) {
     let chunk_size = 1_000;
-    let mut stream_t = crate::buf_parser::StreamTracker::new(chunk_size);
+    let mut stream_t = StreamTracker::new(chunk_size);
+    let mut struct_t = JStructTracker::init();
+    let mut last_token;
 
     loop {
         let bytes_read = reader
@@ -46,10 +48,34 @@ fn simple_poc<R: Read + Seek + BufRead>(
                 }
 
                 // token processing
+                let mut token = token_opt.unwrap();
+                match token.kind {
+                    TokenType::CurlyOpen => {
+                        print!("{{");
+                    }
+                    TokenType::CurlyClose => {
+                        print!("}}");
+                    }
+                    TokenType::BracketOpen => {
+                        print!("[");
+                    }
+                    TokenType::BracketClose => {
+                        print!("]");
+                    }
+                    TokenType::Comma => {
+                        print!(",");
+                    }
+                    TokenType::Colon => {
+                        print!(":");
+                    }
+                    _ => {}
+                }
 
                 if token_iter.peek().is_none() {
                     break;
                 }
+
+                last_token = &token;
             }
 
             // Clear chunk for next iteration
@@ -60,7 +86,6 @@ fn simple_poc<R: Read + Seek + BufRead>(
             } else {
                 stream_t.buffer.drain(..=last_chunk.len());
             }
-
         } else {
             panic!("Invalid chunk");
         }
@@ -71,8 +96,8 @@ fn simple_poc<R: Read + Seek + BufRead>(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
     use super::*;
+    use std::io::Cursor;
     use std::time::Instant;
 
     #[test]
