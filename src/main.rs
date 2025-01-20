@@ -1,9 +1,9 @@
 use clap::Parser;
-use jist::{buf_parser, simd_parser, utils};
+use jist::{buf_parser, schema_parser, simd_parser, utils};
 use log::debug;
 use std::fs::File;
 use std::io;
-use std::io::Read;
+use std::io::{BufReader, Cursor, Read};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -15,7 +15,7 @@ struct Args {
     file: Option<String>,
 
     #[arg(short, long)]
-    path: String,
+    path: Option<String>,
 
     #[arg(short, long)]
     streaming: bool,
@@ -24,14 +24,25 @@ struct Args {
 fn main() {
     let args = Args::parse();
     if args.file.is_some() {
-        match search(
-            None,
-            Some(args.file.unwrap().as_str()),
-            args.path.as_str(),
-            args.streaming,
-        ) {
-            Ok(result) => println!("{}", result),
-            Err(error) => panic!("{}", error),
+        if args.path.is_none() {
+            let f = File::open(args.file.unwrap()).unwrap();
+            let mut reader = BufReader::new(&f);
+            let mut seeker = BufReader::new(&f);
+            match schema_parser::parse(reader, seeker) {
+                Ok(result) => println!("{}", result),
+                Err(error) => panic!("{}", error),
+            }
+        } else {
+            assert!(args.path.is_some());
+            match search(
+                None,
+                Some(args.file.unwrap().as_str()),
+                args.path.unwrap().as_str(),
+                args.streaming,
+            ) {
+                Ok(result) => println!("{}", result),
+                Err(error) => panic!("{}", error),
+            }
         }
     } else {
         let haystack = if let Some(text) = args.data {
@@ -44,14 +55,24 @@ fn main() {
             buffer
         };
         if !haystack.is_empty() {
-            match search(
-                Some(haystack.as_str()),
-                None,
-                args.path.as_str(),
-                args.streaming,
-            ) {
-                Ok(result) => println!("{}", result),
-                Err(error) => panic!("{}", error),
+            if args.path.is_none() {
+                let mut reader = Cursor::new(haystack.as_bytes());
+                let mut seeker = Cursor::new(haystack.as_bytes());
+                match schema_parser::parse(reader, seeker) {
+                    Ok(result) => println!("{}", result),
+                    Err(error) => panic!("{}", error),
+                }
+            } else {
+                assert!(args.path.is_some());
+                match search(
+                    Some(haystack.as_str()),
+                    None,
+                    args.path.unwrap().as_str(),
+                    args.streaming,
+                ) {
+                    Ok(result) => println!("{}", result),
+                    Err(error) => panic!("{}", error),
+                }
             }
         } else {
             panic!("No data provided");

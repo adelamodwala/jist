@@ -15,7 +15,7 @@ const JSON_TEMPLATE: &str = r#"    {
                 {bouou1},
                 {bouou2}
             ],
-            "poo": "{poo}"
+            "poo": {poo}
         },
         "foo": {foo}
     }"#;

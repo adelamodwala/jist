@@ -2,7 +2,7 @@ use crate::model::j_struct_tracker::JStructTracker;
 use crate::model::stream_tracker::StreamTracker;
 use crate::utils::{find_str, token_pos};
 use json_tools::{BufferType, Lexer, Token, TokenType};
-use log::debug;
+use log::{debug, info};
 use md5;
 use md5::Digest;
 use serde_json::{Map, Value};
@@ -51,7 +51,17 @@ fn sort_serde_json(value: &Value) -> Value {
 
 fn add_sub_schema(sub_schemas: &mut HashMap<String, String>, sub_schema: String, schema_tape: String) -> String {
     // sort internal structure
-    let sub_schema_sorted = sort_raw_json(&sub_schema).unwrap();
+    let mut sub_schema_sorted = sort_raw_json(&sub_schema).unwrap();
+
+    // short-circuit out if schema exists already
+    if sub_schemas.contains_key(sub_schema_sorted.as_str()) {
+       return schema_tape.replace(sub_schema_sorted.as_str(), sub_schemas.get(sub_schema_sorted.as_str()).unwrap().as_str());
+    }
+
+    // compress both raw and ordered sub schemas
+    sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
+    let sub_schema = compress_schema(sub_schemas.to_owned(), sub_schema);
+
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0).unwrap().to_string();
 
     // add sub_schema to registry
@@ -63,15 +73,42 @@ fn add_sub_schema(sub_schemas: &mut HashMap<String, String>, sub_schema: String,
         .replace(sub_schema.as_str(), hash.as_str())
 }
 
-fn hydrate_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
+fn compress_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
     let mut result = schema_tape.clone();
     for (sub_schema, murmur3_hash) in &sub_schemas {
-        result = result.replace(murmur3_hash, sub_schema.as_str());
+        result = result.replace(sub_schema, murmur3_hash.as_str());
     }
     result
 }
 
-fn simple_poc<R: Read + Seek + BufRead>(
+fn hydrate_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
+    let mut result = schema_tape.clone();
+    loop {
+        let matches: Vec<String> = sub_schemas.iter()
+            .filter(|(_, value)| result.contains(value.as_str()))
+            .map(|(key, _)| key.clone())
+            .collect();
+        if matches.is_empty() {
+            break;
+        } else {
+            for key in &matches {
+                result = result.replace(sub_schemas.get(key).unwrap().as_str(), key);
+            }
+        }
+    }
+
+    result
+}
+
+fn collapse_array(array_schema: &String) -> String {
+    let mut array: Vec<Value> = serde_json::from_str(sort_raw_json(array_schema).unwrap().as_str()).unwrap();
+    array.dedup();
+    let result = serde_json::to_string(&array).unwrap();
+    debug!("array_schema: {:?}", result);
+    result
+}
+
+pub fn parse<R: Read + Seek + BufRead>(
     mut reader: R,
     mut seeker: R,
 ) -> Result<String, &'static str> {
@@ -140,8 +177,6 @@ fn simple_poc<R: Read + Seek + BufRead>(
                             return Err("invalid json: missing opening curly brace");
                         }
                         let curly_open = last_curly_open.unwrap();
-                        let (first, end) = token_pos(&token.buf)?;
-                        let value = find_str(&mut seeker, curly_open.1, end);
                         let mut value_schema = String::new();
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
                         schema_tape = add_sub_schema(&mut sub_schemas, value_schema, schema_tape);
@@ -174,10 +209,10 @@ fn simple_poc<R: Read + Seek + BufRead>(
                             return Err("invalid json: missing opening curly brace");
                         }
                         let curly_open = last_bracket_open.unwrap();
-                        let (first, end) = token_pos(&token.buf)?;
-                        let value = find_str(&mut seeker, curly_open.1, end);
                         let mut value_schema = String::new();
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
+                        let value_schema_collapsed = collapse_array(&value_schema);
+                        schema_tape = schema_tape.replace(&value_schema, &value_schema_collapsed);
                         schema_tape = add_sub_schema(&mut sub_schemas, value_schema, schema_tape);
 
                         struct_t.arr_idx.pop();
@@ -249,11 +284,12 @@ fn simple_poc<R: Read + Seek + BufRead>(
         stream_t.last_stream_pos += stream_t.last_chunk_len as u64;
     }
 
-    println!("{:?}", sub_schemas);
+    debug!("{:?}", sub_schemas);
 
+    info!("done");
     let tape_str = sort_raw_json(schema_tape.as_str())?;
-    println!("{:?}", tape_str);
-    Ok(hydrate_schema(sub_schemas, tape_str))
+    let full_schema = hydrate_schema(sub_schemas, tape_str);
+    Ok(full_schema.to_string())
 }
 
 #[cfg(test)]
@@ -264,7 +300,15 @@ mod tests {
     fn call(input: &str) -> Result<String, &'static str> {
         let mut reader = Cursor::new(input.as_bytes());
         let mut seeker = Cursor::new(input.as_bytes());
-        simple_poc(&mut reader, &mut seeker)
+        parse(&mut reader, &mut seeker)
+    }
+
+    #[test]
+    fn file_test() {
+        let f = File::open("output.json").unwrap();
+        let mut reader = BufReader::new(&f);
+        let mut seeker = BufReader::new(&f);
+        parse(&mut reader, &mut seeker);
     }
 
     #[test]
@@ -296,12 +340,20 @@ mod tests {
 
         // test repeating patterns
         assert_eq!(
-            call(r#"[{"a":"b"},{"a":"d"}]"#),
-            Ok(r#"[{"a":"string"},{"a":"string"}]"#.to_string())
+            call(r#"[1,2,4]"#),
+            Ok(r#"["number"]"#.to_string())
         );
         assert_eq!(
-            call(r#"[1,2,4]"#),
-            Ok(r#"["number","number","number"]"#.to_string())
+            call(r#"[1,2,4,"bob",43]"#),
+            Ok(r#"["number","string"]"#.to_string())
+        );
+        assert_eq!(
+            call(r#"[{"a":"b"},{"a":"d"}]"#),
+            Ok(r#"[{"a":"string"}]"#.to_string())
+        );
+        assert_eq!(
+            call(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#),
+            Ok(r#"[{"f":"string","h":{"a":"string"}},{"a":"string"}]"#.to_string())
         );
     }
 }
