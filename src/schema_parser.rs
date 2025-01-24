@@ -52,27 +52,20 @@ fn sort_serde_json(value: &Value) -> Value {
 fn add_sub_schema(
     sub_schemas: &mut HashMap<String, String>,
     sub_schema: String,
-    schema_tape: String,
-    tape_stack: &mut Vec<String>,
+    token_type: &TokenType,
+    // schema_tape: String,
+    tape_stack: &mut Vec<(String, TokenType)>,
     signature_db: &mut HashMap<String, HashSet<String>>,
-) -> String {
+) {
     // sort internal structure
     let mut sub_schema_sorted = sort_raw_json(&sub_schema).unwrap();
-
-    // short-circuit out if schema exists already
-    if sub_schemas.contains_key(sub_schema_sorted.as_str()) {
-        return schema_tape.replace(
-            sub_schema_sorted.as_str(),
-            sub_schemas
-                .get(sub_schema_sorted.as_str())
-                .unwrap()
-                .as_str(),
-        );
+    if token_type.eq(&TokenType::BracketClose) {
+        sub_schema_sorted = collapse_array(&sub_schema_sorted);
     }
 
     // compress both raw and ordered sub schemas
     sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
-    let sub_schema = compress_schema(sub_schemas.to_owned(), sub_schema);
+    let sub_schema_compressed = compress_schema(sub_schemas.to_owned(), sub_schema);
 
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
         .unwrap()
@@ -87,29 +80,25 @@ fn add_sub_schema(
     }
     sub_schemas
         .iter()
-        .filter(|(_, value)| sub_schema_sorted.contains(value.as_str()))
         .for_each(|(_, value)| {
-            signature_db
-                .get_mut(&hash)
-                .unwrap()
-                .insert(value.to_string());
+            if sub_schema_sorted.contains(value.as_str()) {
+                signature_db
+                    .get_mut(&hash)
+                    .unwrap()
+                    .insert(value.to_string());
+            }
         });
 
     // add to stack
-    tape_stack.push(hash.to_string());
+    tape_stack.push((hash.to_string(), token_type.clone()));
 
     while tape_stack.len() > 1 {
-        if signature_db.get(&hash).unwrap().contains(&tape_stack[tape_stack.len() - 2]) {
+        if signature_db.get(&hash).unwrap().contains(&tape_stack[tape_stack.len() - 2].0) {
             tape_stack.remove(tape_stack.len() - 2);
         } else {
             break;
         }
     }
-
-    // replace sub_schema instances on tape
-    schema_tape
-        .replace(sub_schema_sorted.as_str(), hash.as_str())
-        .replace(sub_schema.as_str(), hash.as_str())
 }
 
 fn compress_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
@@ -120,7 +109,7 @@ fn compress_schema(sub_schemas: HashMap<String, String>, schema_tape: String) ->
     result
 }
 
-fn hydrate_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
+fn hydrate_schema(sub_schemas: &HashMap<String, String>, schema_tape: String) -> String {
     let mut result = schema_tape.clone();
     loop {
         let matches: Vec<String> = sub_schemas
@@ -153,12 +142,12 @@ pub fn parse<R: Read + Seek + BufRead>(
     mut reader: R,
     mut seeker: R,
 ) -> Result<String, &'static str> {
-    let chunk_size = 1_000_000;
+    let chunk_size = 1_000_000_000;
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
     let mut sub_schemas: HashMap<String, String> = HashMap::new();
-    let mut tape_stack: Vec<String> = Vec::new();
+    let mut tape_stack: Vec<(String, TokenType)> = Vec::new();
     let mut signature_db: HashMap<String, HashSet<String>> = HashMap::new();
 
     loop {
@@ -222,10 +211,10 @@ pub fn parse<R: Read + Seek + BufRead>(
                         let curly_open = last_curly_open.unwrap();
                         let mut value_schema = String::new();
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                        schema_tape = add_sub_schema(
+                        add_sub_schema(
                             &mut sub_schemas,
                             value_schema,
-                            schema_tape,
+                            &token.kind,
                             &mut tape_stack,
                             &mut signature_db
                         );
@@ -260,12 +249,10 @@ pub fn parse<R: Read + Seek + BufRead>(
                         let curly_open = last_bracket_open.unwrap();
                         let mut value_schema = String::new();
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                        let value_schema_collapsed = collapse_array(&value_schema);
-                        schema_tape = schema_tape.replace(&value_schema, &value_schema_collapsed);
-                        schema_tape = add_sub_schema(
+                        add_sub_schema(
                             &mut sub_schemas,
                             value_schema,
-                            schema_tape,
+                            &token.kind,
                             &mut tape_stack,
                             &mut signature_db
                         );
@@ -338,13 +325,15 @@ pub fn parse<R: Read + Seek + BufRead>(
     debug!("{:?}", sub_schemas);
 
     info!("done");
-    let tape_str = sort_raw_json(schema_tape.as_str())?;
-    let full_schema = hydrate_schema(sub_schemas, tape_str);
-    Ok(full_schema.to_string())
+    match tape_stack.last() {
+        None => {Err("unable to find schema")}
+        Some((sub_schema, _token_type)) => Ok(hydrate_schema(&sub_schemas, sub_schema.clone()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use super::*;
     use std::io::Cursor;
 
@@ -354,12 +343,14 @@ mod tests {
         parse(&mut reader, &mut seeker)
     }
 
-    // #[test]
+    #[test]
     fn file_test() {
         let f = File::open("output.json").unwrap();
-        let mut reader = BufReader::new(&f);
-        let mut seeker = BufReader::new(&f);
-        parse(&mut reader, &mut seeker);
+        let data = fs::read_to_string("output.json").unwrap();
+        let mut reader = Cursor::new(data.as_bytes());
+        let mut seeker = Cursor::new(data.as_bytes());
+        let result = parse(&mut reader, &mut seeker);
+        println!("{:?}", result);
     }
 
     #[test]
@@ -413,7 +404,7 @@ mod tests {
         );
         assert_eq!(
             call(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#),
-            Ok(r#"[{"f":"string","h":{"a":"string"}},{"a":"string"}]"#.to_string())
+            Ok(r#"[{"a":"string"},{"f":"string","h":{"a":"string"}}]"#.to_string())
         );
     }
 }
