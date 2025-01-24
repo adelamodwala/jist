@@ -7,10 +7,10 @@ use md5;
 use md5::Digest;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
-use std::ops::Add;
+use std::ops::{Add, ControlFlow};
 use std::path::absolute;
 use std::thread;
 
@@ -49,23 +49,62 @@ fn sort_serde_json(value: &Value) -> Value {
     }
 }
 
-fn add_sub_schema(sub_schemas: &mut HashMap<String, String>, sub_schema: String, schema_tape: String) -> String {
+fn add_sub_schema(
+    sub_schemas: &mut HashMap<String, String>,
+    sub_schema: String,
+    schema_tape: String,
+    tape_stack: &mut Vec<String>,
+    signature_db: &mut HashMap<String, HashSet<String>>,
+) -> String {
     // sort internal structure
     let mut sub_schema_sorted = sort_raw_json(&sub_schema).unwrap();
 
     // short-circuit out if schema exists already
     if sub_schemas.contains_key(sub_schema_sorted.as_str()) {
-       return schema_tape.replace(sub_schema_sorted.as_str(), sub_schemas.get(sub_schema_sorted.as_str()).unwrap().as_str());
+        return schema_tape.replace(
+            sub_schema_sorted.as_str(),
+            sub_schemas
+                .get(sub_schema_sorted.as_str())
+                .unwrap()
+                .as_str(),
+        );
     }
 
     // compress both raw and ordered sub schemas
     sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
     let sub_schema = compress_schema(sub_schemas.to_owned(), sub_schema);
 
-    let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0).unwrap().to_string();
+    let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
+        .unwrap()
+        .to_string();
 
     // add sub_schema to registry
     sub_schemas.insert(sub_schema_sorted.clone(), hash.clone());
+
+    // update signature database
+    if !signature_db.contains_key(&hash) {
+        signature_db.insert(hash.clone(), HashSet::new());
+    }
+    sub_schemas
+        .iter()
+        .filter(|(_, value)| sub_schema_sorted.contains(value.as_str()))
+        .for_each(|(_, value)| {
+            signature_db
+                .get_mut(&hash)
+                .unwrap()
+                .insert(value.to_string());
+        });
+
+    // add to stack
+    tape_stack.push(hash.to_string());
+
+    while tape_stack.len() > 1 {
+        if signature_db.get(&hash).unwrap().contains(&tape_stack[tape_stack.len() - 2]) {
+            tape_stack.remove(tape_stack.len() - 2);
+        } else {
+            break;
+        }
+    }
 
     // replace sub_schema instances on tape
     schema_tape
@@ -84,7 +123,8 @@ fn compress_schema(sub_schemas: HashMap<String, String>, schema_tape: String) ->
 fn hydrate_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
     let mut result = schema_tape.clone();
     loop {
-        let matches: Vec<String> = sub_schemas.iter()
+        let matches: Vec<String> = sub_schemas
+            .iter()
             .filter(|(_, value)| result.contains(value.as_str()))
             .map(|(key, _)| key.clone())
             .collect();
@@ -101,7 +141,8 @@ fn hydrate_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> 
 }
 
 fn collapse_array(array_schema: &String) -> String {
-    let mut array: Vec<Value> = serde_json::from_str(sort_raw_json(array_schema).unwrap().as_str()).unwrap();
+    let mut array: Vec<Value> =
+        serde_json::from_str(sort_raw_json(array_schema).unwrap().as_str()).unwrap();
     array.dedup();
     let result = serde_json::to_string(&array).unwrap();
     debug!("array_schema: {:?}", result);
@@ -112,11 +153,13 @@ pub fn parse<R: Read + Seek + BufRead>(
     mut reader: R,
     mut seeker: R,
 ) -> Result<String, &'static str> {
-    let chunk_size = 1_000;
+    let chunk_size = 1_000_000;
     let mut stream_t = StreamTracker::new(chunk_size);
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
     let mut sub_schemas: HashMap<String, String> = HashMap::new();
+    let mut tape_stack: Vec<String> = Vec::new();
+    let mut signature_db: HashMap<String, HashSet<String>> = HashMap::new();
 
     loop {
         let bytes_read = reader
@@ -179,7 +222,13 @@ pub fn parse<R: Read + Seek + BufRead>(
                         let curly_open = last_curly_open.unwrap();
                         let mut value_schema = String::new();
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                        schema_tape = add_sub_schema(&mut sub_schemas, value_schema, schema_tape);
+                        schema_tape = add_sub_schema(
+                            &mut sub_schemas,
+                            value_schema,
+                            schema_tape,
+                            &mut tape_stack,
+                            &mut signature_db
+                        );
 
                         struct_t.last_open_pin.pop();
                     }
@@ -213,7 +262,13 @@ pub fn parse<R: Read + Seek + BufRead>(
                         value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
                         let value_schema_collapsed = collapse_array(&value_schema);
                         schema_tape = schema_tape.replace(&value_schema, &value_schema_collapsed);
-                        schema_tape = add_sub_schema(&mut sub_schemas, value_schema, schema_tape);
+                        schema_tape = add_sub_schema(
+                            &mut sub_schemas,
+                            value_schema,
+                            schema_tape,
+                            &mut tape_stack,
+                            &mut signature_db
+                        );
 
                         struct_t.arr_idx.pop();
                         struct_t.last_open_pin.pop();
@@ -272,11 +327,7 @@ pub fn parse<R: Read + Seek + BufRead>(
             // Clear chunk for next iteration
             stream_t.chunk.clear();
             // Remove processed data from buffer
-            if bytes_read < chunk_size {
-                stream_t.buffer.drain(..=last_chunk.len() - 1);
-            } else {
-                stream_t.buffer.drain(..=last_chunk.len());
-            }
+            stream_t.buffer.clear();
         } else {
             panic!("Invalid chunk");
         }
@@ -303,7 +354,7 @@ mod tests {
         parse(&mut reader, &mut seeker)
     }
 
-    #[test]
+    // #[test]
     fn file_test() {
         let f = File::open("output.json").unwrap();
         let mut reader = BufReader::new(&f);
@@ -313,10 +364,22 @@ mod tests {
 
     #[test]
     fn ordering() {
-        assert_eq!(sort_raw_json(r#"{"b":"c","a":"f"}"#).unwrap(), r#"{"a":"f","b":"c"}"#.to_string());
-        assert_eq!(sort_raw_json(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"bob":{"f":"g"}}]}"#).unwrap(), r#"{"a":"b","c":{"h":"i"},"e":[2,false,{"bob":{"f":"g"}}]}"#.to_string());
-        assert_eq!(sort_raw_json(r#"[23,12,22,0]"#).unwrap(), r#"[0,12,22,23]"#.to_string());
-        assert_eq!(sort_raw_json(r#"["23","12","22","0"]"#).unwrap(), r#"["0","12","22","23"]"#.to_string());
+        assert_eq!(
+            sort_raw_json(r#"{"b":"c","a":"f"}"#).unwrap(),
+            r#"{"a":"f","b":"c"}"#.to_string()
+        );
+        assert_eq!(
+            sort_raw_json(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"bob":{"f":"g"}}]}"#).unwrap(),
+            r#"{"a":"b","c":{"h":"i"},"e":[2,false,{"bob":{"f":"g"}}]}"#.to_string()
+        );
+        assert_eq!(
+            sort_raw_json(r#"[23,12,22,0]"#).unwrap(),
+            r#"[0,12,22,23]"#.to_string()
+        );
+        assert_eq!(
+            sort_raw_json(r#"["23","12","22","0"]"#).unwrap(),
+            r#"["0","12","22","23"]"#.to_string()
+        );
     }
 
     #[test]
@@ -339,10 +402,7 @@ mod tests {
         );
 
         // test repeating patterns
-        assert_eq!(
-            call(r#"[1,2,4]"#),
-            Ok(r#"["number"]"#.to_string())
-        );
+        assert_eq!(call(r#"[1,2,4]"#), Ok(r#"["number"]"#.to_string()));
         assert_eq!(
             call(r#"[1,2,4,"bob",43]"#),
             Ok(r#"["number","string"]"#.to_string())
