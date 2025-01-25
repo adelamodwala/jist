@@ -19,6 +19,9 @@ struct Args {
 
     #[arg(short, long)]
     streaming: bool,
+
+    #[arg(short, long)]
+    unionize: bool,
 }
 
 fn main() {
@@ -28,7 +31,7 @@ fn main() {
             let f = File::open(args.file.unwrap()).unwrap();
             let mut reader = BufReader::new(&f);
             let mut seeker = BufReader::new(&f);
-            match schema_parser::parse(reader, seeker) {
+            match schema_parser::parse(reader, seeker, args.unionize) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }
@@ -58,7 +61,7 @@ fn main() {
             if args.path.is_none() {
                 let mut reader = Cursor::new(haystack.as_bytes());
                 let mut seeker = Cursor::new(haystack.as_bytes());
-                match schema_parser::parse(reader, seeker) {
+                match schema_parser::parse(reader, seeker, args.unionize) {
                     Ok(result) => println!("{}", result),
                     Err(error) => panic!("{}", error),
                 }

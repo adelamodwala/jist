@@ -1,6 +1,6 @@
 use crate::model::j_struct_tracker::JStructTracker;
 use crate::model::stream_tracker::StreamTracker;
-use crate::utils::{find_str, token_pos};
+use crate::utils::{find_str, sanitize_output, token_pos};
 use json_tools::{BufferType, Lexer, Token, TokenType};
 use log::{debug, info};
 use md5;
@@ -141,6 +141,7 @@ fn collapse_array(array_schema: &String) -> String {
 pub fn parse<R: Read + Seek + BufRead>(
     mut reader: R,
     mut seeker: R,
+    unionize: bool,
 ) -> Result<String, &'static str> {
     let chunk_size = 1_000_000_000;
     let mut stream_t = StreamTracker::new(chunk_size);
@@ -275,7 +276,7 @@ pub fn parse<R: Read + Seek + BufRead>(
                         schema_tape = schema_tape + "\"boolean\""
                     }
                     TokenType::Number => schema_tape = schema_tape + "\"number\"",
-                    TokenType::Null => schema_tape = schema_tape + "\"null\"",
+                    TokenType::Null => schema_tape = schema_tape + "\"string\"",
                     _ => {} // String type can be an object key which requires special handling
                 }
 
@@ -327,7 +328,28 @@ pub fn parse<R: Read + Seek + BufRead>(
     info!("done");
     match tape_stack.last() {
         None => {Err("unable to find schema")}
-        Some((sub_schema, _token_type)) => Ok(hydrate_schema(&sub_schemas, sub_schema.clone()))
+        Some((sub_schema, _token_type)) => {
+            let full_schema = hydrate_schema(&sub_schemas, sub_schema.clone());
+            if full_schema.starts_with("[") && unionize {
+                // Hard-coded assumption that we're looking at an array of objects with similar shape
+                let json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
+                let mut longest = 0;
+                let mut longest_idx = 0;
+                for (idx, el) in json.as_array().unwrap().iter().enumerate() {
+                    if el.to_string().len() > longest {
+                        longest_idx = idx;
+                        longest = el.to_string().len();
+                    }
+                }
+                let mut json_schema: Value = serde_json::from_str("[]").unwrap();
+                json_schema.as_array_mut().unwrap().push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
+
+                Ok(json_schema.to_string())
+            } else {
+                Ok(full_schema)
+            }
+
+        }
     }
 }
 
@@ -337,10 +359,10 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    fn call(input: &str) -> Result<String, &'static str> {
+    fn call(input: &str, unionize: bool) -> Result<String, &'static str> {
         let mut reader = Cursor::new(input.as_bytes());
         let mut seeker = Cursor::new(input.as_bytes());
-        parse(&mut reader, &mut seeker)
+        parse(&mut reader, &mut seeker, unionize)
     }
 
     #[test]
@@ -349,7 +371,7 @@ mod tests {
         let data = fs::read_to_string("output.json").unwrap();
         let mut reader = Cursor::new(data.as_bytes());
         let mut seeker = Cursor::new(data.as_bytes());
-        let result = parse(&mut reader, &mut seeker);
+        let result = parse(&mut reader, &mut seeker, true);
         println!("{:?}", result);
     }
 
@@ -375,35 +397,35 @@ mod tests {
 
     #[test]
     fn it_works() {
-        assert_eq!(call(r#"{"a":"b"}"#), Ok(r#"{"a":"string"}"#.to_string()));
+        assert_eq!(call(r#"{"a":"b"}"#, false), Ok(r#"{"a":"string"}"#.to_string()));
 
         assert_eq!(
-            call(r#"{"a":"b", "c":"d"}"#),
+            call(r#"{"a":"b", "c":"d"}"#, false),
             Ok(r#"{"a":"string","c":"string"}"#.to_string())
         );
 
         assert_eq!(
-            call(r#"{"a":"b", "c":"d", "e":[2,false,"bob"]}"#),
+            call(r#"{"a":"b", "c":"d", "e":[2,false,"bob"]}"#, false),
             Ok(r#"{"a":"string","c":"string","e":["boolean","number","string"]}"#.to_string())
         );
 
         assert_eq!(
-            call(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"rob":"cob","bob":{"f":"g"}}]}"#),
+            call(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"rob":"cob","bob":{"f":"g"}}]}"#, false),
             Ok(r#"{"a":"string","c":{"h":"string"},"e":["boolean","number",{"bob":{"f":"string"},"rob":"string"}]}"#.to_string())
         );
 
         // test repeating patterns
-        assert_eq!(call(r#"[1,2,4]"#), Ok(r#"["number"]"#.to_string()));
+        assert_eq!(call(r#"[1,2,4]"#, true), Ok(r#"["number"]"#.to_string()));
         assert_eq!(
-            call(r#"[1,2,4,"bob",43]"#),
+            call(r#"[1,2,4,"bob",43]"#, false),
             Ok(r#"["number","string"]"#.to_string())
         );
         assert_eq!(
-            call(r#"[{"a":"b"},{"a":"d"}]"#),
+            call(r#"[{"a":"b"},{"a":"d"}]"#, true),
             Ok(r#"[{"a":"string"}]"#.to_string())
         );
         assert_eq!(
-            call(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#),
+            call(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#, false),
             Ok(r#"[{"a":"string"},{"f":"string","h":{"a":"string"}}]"#.to_string())
         );
     }
