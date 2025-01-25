@@ -58,7 +58,11 @@ fn add_sub_schema(
     signature_db: &mut HashMap<String, HashSet<String>>,
 ) {
     // sort internal structure
-    let mut sub_schema_sorted = if skip_sort { sub_schema } else { sort_raw_json(&sub_schema).unwrap() };
+    let mut sub_schema_sorted = if skip_sort {
+        sub_schema
+    } else {
+        sort_raw_json(&sub_schema).unwrap()
+    };
     if token_type.eq(&TokenType::BracketClose) {
         sub_schema_sorted = collapse_array(&sub_schema_sorted);
     }
@@ -129,199 +133,148 @@ fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema_tape: String
 }
 
 fn collapse_array(array_schema: &String) -> String {
-    let mut array: Vec<Value> =
-        serde_json::from_str(array_schema).unwrap();
+    let mut array: Vec<Value> = serde_json::from_str(array_schema).unwrap();
     array.dedup();
     let result = serde_json::to_string(&array).unwrap();
     debug!("array_schema: {:?}", result);
     result
 }
 
-pub fn parse<R: Read + Seek + BufRead>(
-    mut reader: R,
-    mut seeker: R,
-    unionize: bool,
-) -> Result<String, &'static str> {
-    let chunk_size = 1_000_000_000;
-    let mut stream_t = StreamTracker::new(chunk_size);
+pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
     let mut sub_schemas: HashMap<String, String> = HashMap::new();
     let mut tape_stack: Vec<(String, TokenType)> = Vec::new();
     let mut signature_db: HashMap<String, HashSet<String>> = HashMap::new();
 
+    let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
     loop {
-        let bytes_read = reader
-            .by_ref()
-            .take(chunk_size as u64)
-            .read_to_end(&mut stream_t.buffer)
-            .unwrap();
-        if bytes_read == 0 && stream_t.buffer.is_empty() {
+        let token_opt = token_iter.next();
+        if token_opt.is_none() {
             break;
         }
 
-        // Find the last line break (add one if last buffer read)
-        let mut chunk_str = String::from_utf8(stream_t.buffer.clone()).unwrap();
-        if bytes_read < chunk_size {
-            chunk_str.push('\n');
+        // token processing
+        let mut token = token_opt.unwrap();
+        match token.kind {
+            TokenType::CurlyOpen => {
+                struct_t.depth_curr.0 += 1;
+                struct_t.depth_curr.2 += 1;
+                let (first, end) = token_pos(&token.buf)?;
+                struct_t
+                    .last_open_pin
+                    .push((TokenType::CurlyOpen, first, schema_tape.len()));
+                schema_tape = schema_tape + "{";
+            }
+            TokenType::CurlyClose => {
+                struct_t.depth_curr.0 -= 1;
+                struct_t.depth_curr.2 -= 1;
+                schema_tape = schema_tape + "}";
+
+                let last_curly_open = struct_t
+                    .last_open_pin
+                    .iter()
+                    .filter(|sym| sym.0 == TokenType::CurlyOpen)
+                    .last();
+                if last_curly_open.is_none() {
+                    return Err("invalid json: missing opening curly brace");
+                }
+                let curly_open = last_curly_open.unwrap();
+                let mut value_schema = String::new();
+                value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
+                add_sub_schema(
+                    &mut sub_schemas,
+                    value_schema,
+                    &token.kind,
+                    unionize, // skip sorting if going to take the largest schema
+                    &mut tape_stack,
+                    &mut signature_db,
+                );
+
+                struct_t.last_open_pin.pop();
+            }
+            TokenType::BracketOpen => {
+                struct_t.depth_curr.0 += 1;
+                struct_t.depth_curr.1 += 1;
+                struct_t.arr_idx.push(0);
+                let (first, end) = token_pos(&token.buf)?;
+                struct_t
+                    .last_open_pin
+                    .push((TokenType::BracketOpen, first, schema_tape.len()));
+                schema_tape = schema_tape + "[";
+            }
+            TokenType::BracketClose => {
+                struct_t.depth_curr.0 -= 1;
+                struct_t.depth_curr.1 -= 1;
+                schema_tape = schema_tape + "]";
+
+                let last_bracket_open = struct_t
+                    .last_open_pin
+                    .iter()
+                    .filter(|sym| sym.0 == TokenType::BracketOpen)
+                    .last();
+                if last_bracket_open.is_none() {
+                    return Err("invalid json: missing opening curly brace");
+                }
+                let curly_open = last_bracket_open.unwrap();
+                let mut value_schema = String::new();
+                value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
+                add_sub_schema(
+                    &mut sub_schemas,
+                    value_schema,
+                    &token.kind,
+                    unionize, // skip sorting if going to take the largest schema
+                    &mut tape_stack,
+                    &mut signature_db,
+                );
+
+                struct_t.arr_idx.pop();
+                struct_t.last_open_pin.pop();
+            }
+            TokenType::Comma => {
+                let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
+                if struct_t.depth_curr.1 > -1                    // must be inside an array
+                    && token_type.eq(&TokenType::BracketOpen)
+                {
+                    let arr_idx_len = struct_t.arr_idx.len();
+                    struct_t.arr_idx[arr_idx_len - 1] += 1;
+                }
+                schema_tape = schema_tape + ",";
+            }
+            TokenType::Colon => schema_tape = schema_tape + ":",
+            TokenType::BooleanTrue | TokenType::BooleanFalse => {
+                schema_tape = schema_tape + "\"boolean\""
+            }
+            TokenType::Number => schema_tape = schema_tape + "\"number\"",
+            TokenType::Null => schema_tape = schema_tape + "\"string\"",
+            _ => {} // String type can be an object key which requires special handling
         }
-        if let Some(last_chunk_tup) = chunk_str.rsplit_once('\n') {
-            let last_chunk = last_chunk_tup.0;
-            debug!("last_chunk: {}", last_chunk);
-            // Process the chunk that ends with a newline
-            stream_t.chunk.extend_from_slice(last_chunk.as_bytes());
-            stream_t.chunk.push(b'\n');
-            stream_t.last_chunk_len = stream_t.chunk.len();
 
-            // chunk processing
-            let mut token_iter = Lexer::new(stream_t.chunk.clone(), BufferType::Span).peekable();
-            loop {
-                let token_opt = token_iter.next();
-                if token_opt.is_none() {
-                    break;
+        if !struct_t.last_open_pin.is_empty() {
+            let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
+            if token_type.eq(&TokenType::BracketOpen) {
+                if token.kind == TokenType::String {
+                    schema_tape = schema_tape + "\"string\"";
+                }
+            } else if token_type.eq(&TokenType::CurlyOpen) {
+                if token.kind == TokenType::String && struct_t.last_token_key_delimiter {
+                    let (first, end) = token_pos(&token.buf)?;
+                    let key = &haystack[first as usize..end as usize];
+                    schema_tape = schema_tape + &key;
+                    struct_t.last_token_key_delimiter = false;
+                } else if token.kind == TokenType::String {
+                    schema_tape = schema_tape + "\"string\"";
                 }
 
-                // token processing
-                let mut token = token_opt.unwrap();
-                match token.kind {
-                    TokenType::CurlyOpen => {
-                        struct_t.depth_curr.0 += 1;
-                        struct_t.depth_curr.2 += 1;
-                        let (first, end) = token_pos(&token.buf)?;
-                        struct_t.last_open_pin.push((
-                            TokenType::CurlyOpen,
-                            first,
-                            schema_tape.len(),
-                        ));
-                        schema_tape = schema_tape + "{";
-                    }
-                    TokenType::CurlyClose => {
-                        struct_t.depth_curr.0 -= 1;
-                        struct_t.depth_curr.2 -= 1;
-                        schema_tape = schema_tape + "}";
-
-                        let last_curly_open = struct_t
-                            .last_open_pin
-                            .iter()
-                            .filter(|sym| sym.0 == TokenType::CurlyOpen)
-                            .last();
-                        if last_curly_open.is_none() {
-                            return Err("invalid json: missing opening curly brace");
-                        }
-                        let curly_open = last_curly_open.unwrap();
-                        let mut value_schema = String::new();
-                        value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                        add_sub_schema(
-                            &mut sub_schemas,
-                            value_schema,
-                            &token.kind,
-                            unionize,   // skip sorting if going to take the largest schema
-                            &mut tape_stack,
-                            &mut signature_db,
-                        );
-
-                        struct_t.last_open_pin.pop();
-                    }
-                    TokenType::BracketOpen => {
-                        struct_t.depth_curr.0 += 1;
-                        struct_t.depth_curr.1 += 1;
-                        struct_t.arr_idx.push(0);
-                        let (first, end) = token_pos(&token.buf)?;
-                        struct_t.last_open_pin.push((
-                            TokenType::BracketOpen,
-                            first,
-                            schema_tape.len(),
-                        ));
-                        schema_tape = schema_tape + "[";
-                    }
-                    TokenType::BracketClose => {
-                        struct_t.depth_curr.0 -= 1;
-                        struct_t.depth_curr.1 -= 1;
-                        schema_tape = schema_tape + "]";
-
-                        let last_bracket_open = struct_t
-                            .last_open_pin
-                            .iter()
-                            .filter(|sym| sym.0 == TokenType::BracketOpen)
-                            .last();
-                        if last_bracket_open.is_none() {
-                            return Err("invalid json: missing opening curly brace");
-                        }
-                        let curly_open = last_bracket_open.unwrap();
-                        let mut value_schema = String::new();
-                        value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                        add_sub_schema(
-                            &mut sub_schemas,
-                            value_schema,
-                            &token.kind,
-                            unionize,   // skip sorting if going to take the largest schema
-                            &mut tape_stack,
-                            &mut signature_db,
-                        );
-
-                        struct_t.arr_idx.pop();
-                        struct_t.last_open_pin.pop();
-                    }
-                    TokenType::Comma => {
-                        let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
-                        if struct_t.depth_curr.1 > -1                    // must be inside an array
-                            && token_type.eq(&TokenType::BracketOpen)
-                        {
-                            let arr_idx_len = struct_t.arr_idx.len();
-                            struct_t.arr_idx[arr_idx_len - 1] += 1;
-                        }
-                        schema_tape = schema_tape + ",";
-                    }
-                    TokenType::Colon => schema_tape = schema_tape + ":",
-                    TokenType::BooleanTrue | TokenType::BooleanFalse => {
-                        schema_tape = schema_tape + "\"boolean\""
-                    }
-                    TokenType::Number => schema_tape = schema_tape + "\"number\"",
-                    TokenType::Null => schema_tape = schema_tape + "\"string\"",
-                    _ => {} // String type can be an object key which requires special handling
-                }
-
-                if !struct_t.last_open_pin.is_empty() {
-                    let (token_type, _, _) = struct_t.last_open_pin.last().unwrap();
-                    if token_type.eq(&TokenType::BracketOpen) {
-                        if token.kind == TokenType::String {
-                            schema_tape = schema_tape + "\"string\"";
-                        }
-                    } else if token_type.eq(&TokenType::CurlyOpen) {
-                        if token.kind == TokenType::String && struct_t.last_token_key_delimiter {
-                            let (first, end) = token_pos(&token.buf)?;
-                            let key = find_str(
-                                &mut seeker,
-                                first + stream_t.last_stream_pos,
-                                end + stream_t.last_stream_pos,
-                            )
-                            .unwrap();
-                            schema_tape = schema_tape + &key;
-                            struct_t.last_token_key_delimiter = false;
-                        } else if token.kind == TokenType::String {
-                            schema_tape = schema_tape + "\"string\"";
-                        }
-
-                        if token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma {
-                            struct_t.last_token_key_delimiter = true;
-                        }
-                    }
-                }
-
-                if token_iter.peek().is_none() {
-                    break;
+                if token.kind == TokenType::CurlyOpen || token.kind == TokenType::Comma {
+                    struct_t.last_token_key_delimiter = true;
                 }
             }
-
-            // Clear chunk for next iteration
-            stream_t.chunk.clear();
-            // Remove processed data from buffer
-            stream_t.buffer.clear();
-        } else {
-            panic!("Invalid chunk");
         }
 
-        stream_t.last_stream_pos += stream_t.last_chunk_len as u64;
+        if token_iter.peek().is_none() {
+            break;
+        }
     }
 
     debug!("{:?}", sub_schemas);
@@ -361,21 +314,16 @@ pub fn parse<R: Read + Seek + BufRead>(
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::Cursor;
 
     fn call(input: &str, unionize: bool) -> Result<String, &'static str> {
-        let mut reader = Cursor::new(input.as_bytes());
-        let mut seeker = Cursor::new(input.as_bytes());
-        parse(&mut reader, &mut seeker, unionize)
+        parse(input, unionize)
     }
 
     // #[test]
     fn file_test() {
         let f = File::open("output.json").unwrap();
         let data = fs::read_to_string("output.json").unwrap();
-        let mut reader = Cursor::new(data.as_bytes());
-        let mut seeker = Cursor::new(data.as_bytes());
-        let result = parse(&mut reader, &mut seeker, true);
+        let result = parse(&data, true);
         println!("{:?}", result);
     }
 

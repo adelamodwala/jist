@@ -2,7 +2,7 @@ use clap::Parser;
 use jist::{buf_parser, schema_parser, simd_parser, utils};
 use log::debug;
 use std::fs::File;
-use std::io;
+use std::{fs, io};
 use std::io::{BufReader, Cursor, Read};
 
 #[derive(Parser, Debug)]
@@ -28,10 +28,7 @@ fn main() {
     let args = Args::parse();
     if args.file.is_some() {
         if args.path.is_none() {
-            let f = File::open(args.file.unwrap()).unwrap();
-            let mut reader = BufReader::new(&f);
-            let mut seeker = BufReader::new(&f);
-            match schema_parser::parse(reader, seeker, args.unionize) {
+            match schema_parser::parse(fs::read_to_string(args.file.unwrap()).unwrap().as_str(), args.unionize) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }
@@ -59,9 +56,7 @@ fn main() {
         };
         if !haystack.is_empty() {
             if args.path.is_none() {
-                let mut reader = Cursor::new(haystack.as_bytes());
-                let mut seeker = Cursor::new(haystack.as_bytes());
-                match schema_parser::parse(reader, seeker, args.unionize) {
+                match schema_parser::parse(&haystack, args.unionize) {
                     Ok(result) => println!("{}", result),
                     Err(error) => panic!("{}", error),
                 }
