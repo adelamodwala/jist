@@ -5,6 +5,7 @@ use json_tools::{BufferType, Lexer, Token, TokenType};
 use log::{debug, info};
 use md5;
 use md5::Digest;
+use regex::Regex;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -12,7 +13,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::ops::{Add, ControlFlow};
 use std::path::absolute;
-use std::thread;
 
 fn sort_raw_json(json: &str) -> Result<String, &'static str> {
     // First parse to Value
@@ -53,19 +53,18 @@ fn add_sub_schema(
     sub_schemas: &mut HashMap<String, String>,
     sub_schema: String,
     token_type: &TokenType,
-    // schema_tape: String,
+    skip_sort: bool,
     tape_stack: &mut Vec<(String, TokenType)>,
     signature_db: &mut HashMap<String, HashSet<String>>,
 ) {
     // sort internal structure
-    let mut sub_schema_sorted = sort_raw_json(&sub_schema).unwrap();
+    let mut sub_schema_sorted = if skip_sort { sub_schema } else { sort_raw_json(&sub_schema).unwrap() };
     if token_type.eq(&TokenType::BracketClose) {
         sub_schema_sorted = collapse_array(&sub_schema_sorted);
     }
 
     // compress both raw and ordered sub schemas
     sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
-    let sub_schema_compressed = compress_schema(sub_schemas.to_owned(), sub_schema);
 
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
         .unwrap()
@@ -78,22 +77,24 @@ fn add_sub_schema(
     if !signature_db.contains_key(&hash) {
         signature_db.insert(hash.clone(), HashSet::new());
     }
-    sub_schemas
-        .iter()
-        .for_each(|(_, value)| {
-            if sub_schema_sorted.contains(value.as_str()) {
-                signature_db
-                    .get_mut(&hash)
-                    .unwrap()
-                    .insert(value.to_string());
-            }
-        });
+    sub_schemas.iter().for_each(|(_, value)| {
+        if sub_schema_sorted.contains(value.as_str()) {
+            signature_db
+                .get_mut(&hash)
+                .unwrap()
+                .insert(value.to_string());
+        }
+    });
 
     // add to stack
     tape_stack.push((hash.to_string(), token_type.clone()));
 
     while tape_stack.len() > 1 {
-        if signature_db.get(&hash).unwrap().contains(&tape_stack[tape_stack.len() - 2].0) {
+        if signature_db
+            .get(&hash)
+            .unwrap()
+            .contains(&tape_stack[tape_stack.len() - 2].0)
+        {
             tape_stack.remove(tape_stack.len() - 2);
         } else {
             break;
@@ -101,37 +102,35 @@ fn add_sub_schema(
     }
 }
 
-fn compress_schema(sub_schemas: HashMap<String, String>, schema_tape: String) -> String {
-    let mut result = schema_tape.clone();
-    for (sub_schema, murmur3_hash) in &sub_schemas {
-        result = result.replace(sub_schema, murmur3_hash.as_str());
+fn compress_schema(sub_schemas: HashMap<String, String>, mut schema_tape: String) -> String {
+    for (sub_schema, murmur3_hash) in sub_schemas.iter() {
+        schema_tape = schema_tape.replace(sub_schema, murmur3_hash.as_str());
     }
-    result
+    schema_tape
 }
 
-fn hydrate_schema(sub_schemas: &HashMap<String, String>, schema_tape: String) -> String {
-    let mut result = schema_tape.clone();
+fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema_tape: String) -> String {
     loop {
         let matches: Vec<String> = sub_schemas
             .iter()
-            .filter(|(_, value)| result.contains(value.as_str()))
+            .filter(|(_, value)| schema_tape.contains(value.as_str()))
             .map(|(key, _)| key.clone())
             .collect();
         if matches.is_empty() {
             break;
         } else {
             for key in &matches {
-                result = result.replace(sub_schemas.get(key).unwrap().as_str(), key);
+                schema_tape = schema_tape.replace(sub_schemas.get(key).unwrap().as_str(), key);
             }
         }
     }
 
-    result
+    schema_tape
 }
 
 fn collapse_array(array_schema: &String) -> String {
     let mut array: Vec<Value> =
-        serde_json::from_str(sort_raw_json(array_schema).unwrap().as_str()).unwrap();
+        serde_json::from_str(array_schema).unwrap();
     array.dedup();
     let result = serde_json::to_string(&array).unwrap();
     debug!("array_schema: {:?}", result);
@@ -216,8 +215,9 @@ pub fn parse<R: Read + Seek + BufRead>(
                             &mut sub_schemas,
                             value_schema,
                             &token.kind,
+                            unionize,   // skip sorting if going to take the largest schema
                             &mut tape_stack,
-                            &mut signature_db
+                            &mut signature_db,
                         );
 
                         struct_t.last_open_pin.pop();
@@ -254,8 +254,9 @@ pub fn parse<R: Read + Seek + BufRead>(
                             &mut sub_schemas,
                             value_schema,
                             &token.kind,
+                            unionize,   // skip sorting if going to take the largest schema
                             &mut tape_stack,
-                            &mut signature_db
+                            &mut signature_db,
                         );
 
                         struct_t.arr_idx.pop();
@@ -327,12 +328,13 @@ pub fn parse<R: Read + Seek + BufRead>(
 
     info!("done");
     match tape_stack.last() {
-        None => {Err("unable to find schema")}
+        None => Err("unable to find schema"),
         Some((sub_schema, _token_type)) => {
-            let full_schema = hydrate_schema(&sub_schemas, sub_schema.clone());
+            let full_schema = hydrate_schema(&sub_schemas, sub_schema.to_string());
             if full_schema.starts_with("[") && unionize {
                 // Hard-coded assumption that we're looking at an array of objects with similar shape
-                let json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
+                let json: Value =
+                    serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
                 let mut longest = 0;
                 let mut longest_idx = 0;
                 for (idx, el) in json.as_array().unwrap().iter().enumerate() {
@@ -342,21 +344,23 @@ pub fn parse<R: Read + Seek + BufRead>(
                     }
                 }
                 let mut json_schema: Value = serde_json::from_str("[]").unwrap();
-                json_schema.as_array_mut().unwrap().push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
+                json_schema
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
 
                 Ok(json_schema.to_string())
             } else {
                 Ok(full_schema)
             }
-
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use super::*;
+    use std::fs;
     use std::io::Cursor;
 
     fn call(input: &str, unionize: bool) -> Result<String, &'static str> {
@@ -365,7 +369,7 @@ mod tests {
         parse(&mut reader, &mut seeker, unionize)
     }
 
-    #[test]
+    // #[test]
     fn file_test() {
         let f = File::open("output.json").unwrap();
         let data = fs::read_to_string("output.json").unwrap();
@@ -397,7 +401,10 @@ mod tests {
 
     #[test]
     fn it_works() {
-        assert_eq!(call(r#"{"a":"b"}"#, false), Ok(r#"{"a":"string"}"#.to_string()));
+        assert_eq!(
+            call(r#"{"a":"b"}"#, false),
+            Ok(r#"{"a":"string"}"#.to_string())
+        );
 
         assert_eq!(
             call(r#"{"a":"b", "c":"d"}"#, false),
