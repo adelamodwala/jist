@@ -54,9 +54,8 @@ fn add_sub_schema(
     sub_schema: String,
     token_type: &TokenType,
     skip_sort: bool,
-    tape_stack: &mut Vec<(String, TokenType)>,
     signature_db: &mut HashMap<String, HashSet<String>>,
-) {
+) -> (String, TokenType) {
     // sort internal structure
     let mut sub_schema_sorted = if skip_sort {
         sub_schema
@@ -81,6 +80,8 @@ fn add_sub_schema(
     if !signature_db.contains_key(&hash) {
         signature_db.insert(hash.clone(), HashSet::new());
     }
+
+    // this likely has big performance penalties re StrSearcher
     sub_schemas.iter().for_each(|(_, value)| {
         if sub_schema_sorted.contains(value.as_str()) {
             signature_db
@@ -90,20 +91,7 @@ fn add_sub_schema(
         }
     });
 
-    // add to stack
-    tape_stack.push((hash.to_string(), token_type.clone()));
-
-    while tape_stack.len() > 1 {
-        if signature_db
-            .get(&hash)
-            .unwrap()
-            .contains(&tape_stack[tape_stack.len() - 2].0)
-        {
-            tape_stack.remove(tape_stack.len() - 2);
-        } else {
-            break;
-        }
-    }
+    (hash.to_string(), token_type.clone())
 }
 
 fn compress_schema(sub_schemas: HashMap<String, String>, mut schema_tape: String) -> String {
@@ -144,7 +132,7 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
     let mut sub_schemas: HashMap<String, String> = HashMap::new();
-    let mut tape_stack: Vec<(String, TokenType)> = Vec::new();
+    let mut last_seen_schema: (String, TokenType) = (String::new(), TokenType::Invalid);
     let mut signature_db: HashMap<String, HashSet<String>> = HashMap::new();
 
     let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
@@ -182,12 +170,11 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                 let curly_open = last_curly_open.unwrap();
                 let mut value_schema = String::new();
                 value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                add_sub_schema(
+                last_seen_schema = add_sub_schema(
                     &mut sub_schemas,
                     value_schema,
                     &token.kind,
                     unionize, // skip sorting if going to take the largest schema
-                    &mut tape_stack,
                     &mut signature_db,
                 );
 
@@ -219,12 +206,11 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                 let curly_open = last_bracket_open.unwrap();
                 let mut value_schema = String::new();
                 value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                add_sub_schema(
+                last_seen_schema = add_sub_schema(
                     &mut sub_schemas,
                     value_schema,
                     &token.kind,
                     unionize, // skip sorting if going to take the largest schema
-                    &mut tape_stack,
                     &mut signature_db,
                 );
 
@@ -280,33 +266,26 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
     debug!("{:?}", sub_schemas);
 
     info!("done");
-    match tape_stack.last() {
-        None => Err("unable to find schema"),
-        Some((sub_schema, _token_type)) => {
-            let full_schema = hydrate_schema(&sub_schemas, sub_schema.to_string());
-            if full_schema.starts_with("[") && unionize {
-                // Hard-coded assumption that we're looking at an array of objects with similar shape
-                let json: Value =
-                    serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
-                let mut longest = 0;
-                let mut longest_idx = 0;
-                for (idx, el) in json.as_array().unwrap().iter().enumerate() {
-                    if el.to_string().len() > longest {
-                        longest_idx = idx;
-                        longest = el.to_string().len();
-                    }
-                }
-                let mut json_schema: Value = serde_json::from_str("[]").unwrap();
-                json_schema
-                    .as_array_mut()
-                    .unwrap()
-                    .push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
-
-                Ok(json_schema.to_string())
-            } else {
-                Ok(full_schema)
+    let full_schema = hydrate_schema(&sub_schemas, last_seen_schema.0);
+    if last_seen_schema.1.eq(&TokenType::BracketClose) && unionize {
+        let json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
+        let mut longest = 0;
+        let mut longest_idx = 0;
+        for (idx, el) in json.as_array().unwrap().iter().enumerate() {
+            if el.to_string().len() > longest {
+                longest_idx = idx;
+                longest = el.to_string().len();
             }
         }
+        let mut json_schema: Value = serde_json::from_str("[]").unwrap();
+        json_schema
+            .as_array_mut()
+            .unwrap()
+            .push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
+
+        Ok(json_schema.to_string())
+    } else {
+        Ok(full_schema)
     }
 }
 
@@ -314,10 +293,6 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
 mod tests {
     use super::*;
     use std::fs;
-
-    fn call(input: &str, unionize: bool) -> Result<String, &'static str> {
-        parse(input, unionize)
-    }
 
     // #[test]
     fn file_test() {
@@ -350,37 +325,37 @@ mod tests {
     #[test]
     fn it_works() {
         assert_eq!(
-            call(r#"{"a":"b"}"#, false),
+            parse(r#"{"a":"b"}"#, false),
             Ok(r#"{"a":"string"}"#.to_string())
         );
 
         assert_eq!(
-            call(r#"{"a":"b", "c":"d"}"#, false),
+            parse(r#"{"a":"b", "c":"d"}"#, false),
             Ok(r#"{"a":"string","c":"string"}"#.to_string())
         );
 
         assert_eq!(
-            call(r#"{"a":"b", "c":"d", "e":[2,false,"bob"]}"#, false),
+            parse(r#"{"a":"b", "c":"d", "e":[2,false,"bob"]}"#, false),
             Ok(r#"{"a":"string","c":"string","e":["boolean","number","string"]}"#.to_string())
         );
 
         assert_eq!(
-            call(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"rob":"cob","bob":{"f":"g"}}]}"#, false),
+            parse(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"rob":"cob","bob":{"f":"g"}}]}"#, false),
             Ok(r#"{"a":"string","c":{"h":"string"},"e":["boolean","number",{"bob":{"f":"string"},"rob":"string"}]}"#.to_string())
         );
 
         // test repeating patterns
-        assert_eq!(call(r#"[1,2,4]"#, true), Ok(r#"["number"]"#.to_string()));
+        assert_eq!(parse(r#"[1,2,4]"#, true), Ok(r#"["number"]"#.to_string()));
         assert_eq!(
-            call(r#"[1,2,4,"bob",43]"#, false),
+            parse(r#"[1,2,4,"bob",43]"#, false),
             Ok(r#"["number","string"]"#.to_string())
         );
         assert_eq!(
-            call(r#"[{"a":"b"},{"a":"d"}]"#, true),
+            parse(r#"[{"a":"b"},{"a":"d"}]"#, true),
             Ok(r#"[{"a":"string"}]"#.to_string())
         );
         assert_eq!(
-            call(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#, false),
+            parse(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#, false),
             Ok(r#"[{"a":"string"},{"f":"string","h":{"a":"string"}}]"#.to_string())
         );
     }
