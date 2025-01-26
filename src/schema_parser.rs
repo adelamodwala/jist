@@ -54,7 +54,6 @@ fn add_sub_schema(
     sub_schema: String,
     token_type: &TokenType,
     skip_sort: bool,
-    signature_db: &mut HashMap<String, HashSet<String>>,
 ) -> (String, TokenType) {
     // sort internal structure
     let mut sub_schema_sorted = if skip_sort {
@@ -63,10 +62,9 @@ fn add_sub_schema(
         sort_raw_json(&sub_schema).unwrap()
     };
     if token_type.eq(&TokenType::BracketClose) {
-        sub_schema_sorted = collapse_array(&sub_schema_sorted);
+        sub_schema_sorted = dedup_array(&sub_schema_sorted);
     }
 
-    // compress both raw and ordered sub schemas
     sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
 
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
@@ -76,27 +74,18 @@ fn add_sub_schema(
     // add sub_schema to registry
     sub_schemas.insert(sub_schema_sorted.clone(), hash.clone());
 
-    // update signature database
-    if !signature_db.contains_key(&hash) {
-        signature_db.insert(hash.clone(), HashSet::new());
-    }
-
-    // this likely has big performance penalties re StrSearcher
-    sub_schemas.iter().for_each(|(_, value)| {
-        if sub_schema_sorted.contains(value.as_str()) {
-            signature_db
-                .get_mut(&hash)
-                .unwrap()
-                .insert(value.to_string());
-        }
-    });
-
     (hash.to_string(), token_type.clone())
 }
 
+fn dedup_array(array_schema: &String) -> String {
+    let mut array: Vec<Value> = serde_json::from_str(array_schema).unwrap();
+    array.dedup();
+    serde_json::to_string(&array).unwrap()
+}
+
 fn compress_schema(sub_schemas: HashMap<String, String>, mut schema_tape: String) -> String {
-    for (sub_schema, murmur3_hash) in sub_schemas.iter() {
-        schema_tape = schema_tape.replace(sub_schema, murmur3_hash.as_str());
+    for (sub_schema, hash) in sub_schemas.iter() {
+        schema_tape = schema_tape.replace(sub_schema, hash.as_str());
     }
     schema_tape
 }
@@ -120,20 +109,11 @@ fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema_tape: String
     schema_tape
 }
 
-fn collapse_array(array_schema: &String) -> String {
-    let mut array: Vec<Value> = serde_json::from_str(array_schema).unwrap();
-    array.dedup();
-    let result = serde_json::to_string(&array).unwrap();
-    debug!("array_schema: {:?}", result);
-    result
-}
-
 pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
     let mut sub_schemas: HashMap<String, String> = HashMap::new();
     let mut last_seen_schema: (String, TokenType) = (String::new(), TokenType::Invalid);
-    let mut signature_db: HashMap<String, HashSet<String>> = HashMap::new();
 
     let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
     loop {
@@ -175,7 +155,6 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                     value_schema,
                     &token.kind,
                     unionize, // skip sorting if going to take the largest schema
-                    &mut signature_db,
                 );
 
                 struct_t.last_open_pin.pop();
@@ -211,7 +190,6 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                     value_schema,
                     &token.kind,
                     unionize, // skip sorting if going to take the largest schema
-                    &mut signature_db,
                 );
 
                 struct_t.arr_idx.pop();

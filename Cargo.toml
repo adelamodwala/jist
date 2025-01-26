@@ -19,4 +19,3 @@ autocxx = "0.27.0"
 [build-dependencies]
 autocxx-build = "0.27.0"
 miette = { version = "7.4.0", features = ["fancy"] }
-cc = { version = "1.0", features = ["parallel"] }
