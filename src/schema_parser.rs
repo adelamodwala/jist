@@ -65,8 +65,6 @@ fn add_sub_schema(
         sub_schema_sorted = dedup_array(&sub_schema_sorted);
     }
 
-    sub_schema_sorted = compress_schema(sub_schemas.to_owned(), sub_schema_sorted);
-
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
         .unwrap()
         .to_string();
@@ -81,13 +79,6 @@ fn dedup_array(array_schema: &String) -> String {
     let mut array: Vec<Value> = serde_json::from_str(array_schema).unwrap();
     array.dedup();
     serde_json::to_string(&array).unwrap()
-}
-
-fn compress_schema(sub_schemas: HashMap<String, String>, mut schema: String) -> String {
-    for (sub_schema, hash) in sub_schemas.iter() {
-        schema = schema.replace(sub_schema, hash.as_str());
-    }
-    schema
 }
 
 fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema: String) -> String {
