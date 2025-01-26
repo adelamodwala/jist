@@ -83,30 +83,30 @@ fn dedup_array(array_schema: &String) -> String {
     serde_json::to_string(&array).unwrap()
 }
 
-fn compress_schema(sub_schemas: HashMap<String, String>, mut schema_tape: String) -> String {
+fn compress_schema(sub_schemas: HashMap<String, String>, mut schema: String) -> String {
     for (sub_schema, hash) in sub_schemas.iter() {
-        schema_tape = schema_tape.replace(sub_schema, hash.as_str());
+        schema = schema.replace(sub_schema, hash.as_str());
     }
-    schema_tape
+    schema
 }
 
-fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema_tape: String) -> String {
+fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema: String) -> String {
     loop {
         let matches: Vec<String> = sub_schemas
             .iter()
-            .filter(|(_, value)| schema_tape.contains(value.as_str()))
+            .filter(|(_, value)| schema.contains(value.as_str()))
             .map(|(key, _)| key.clone())
             .collect();
         if matches.is_empty() {
             break;
         } else {
             for key in &matches {
-                schema_tape = schema_tape.replace(sub_schemas.get(key).unwrap().as_str(), key);
+                schema = schema.replace(sub_schemas.get(key).unwrap().as_str(), key);
             }
         }
     }
 
-    schema_tape
+    schema
 }
 
 pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
