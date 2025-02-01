@@ -20,17 +20,6 @@ use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use futures::task::SpawnExt;
 use json_value_merge::Merge;
 
-fn sort_raw_json(json: &str) -> Result<String, &'static str> {
-    // First parse to Value
-    let value: Value = serde_json::from_str(json).unwrap();
-
-    // Convert to BTreeMap to sort
-    let sorted = sort_serde_json(&value);
-
-    // Convert back to Value
-    Ok(sorted.to_string())
-}
-
 fn sort_serde_json(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -53,29 +42,6 @@ fn sort_serde_json(value: &Value) -> Value {
         // Other value types remain unchanged
         _ => value.clone(),
     }
-}
-
-fn add_sub_schema(
-    sub_schemas: &mut HashMap<String, String>,
-    sub_schema: String,
-    token_type: &TokenType,
-    skip_sort: bool,
-) -> (String, TokenType) {
-    // sort internal structure
-    let mut sub_schema_sorted = if skip_sort {
-        sub_schema
-    } else {
-        sort_raw_json(&sub_schema).unwrap()
-    };
-
-    let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
-        .unwrap()
-        .to_string();
-
-    // add sub_schema to registry
-    sub_schemas.insert(sub_schema_sorted.clone(), hash.clone());
-
-    (hash.to_string(), token_type.clone())
 }
 
 fn deduplicate_arrays(value: Value) -> Value {
@@ -105,25 +71,6 @@ fn deduplicate_arrays(value: Value) -> Value {
         // Return other value types unchanged
         _ => value,
     }
-}
-
-fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema: String) -> String {
-    loop {
-        let matches: Vec<String> = sub_schemas
-            .iter()
-            .filter(|(_, value)| schema.contains(value.as_str()))
-            .map(|(key, _)| key.clone())
-            .collect();
-        if matches.is_empty() {
-            break;
-        } else {
-            for key in &matches {
-                schema = schema.replace(sub_schemas.get(key).unwrap().as_str(), key);
-            }
-        }
-    }
-
-    schema
 }
 
 pub fn summarize(haystack: &str, unionize: bool) -> Result<String, &'static str> {
@@ -168,8 +115,6 @@ pub fn summarize(haystack: &str, unionize: bool) -> Result<String, &'static str>
 pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
     let mut struct_t = JStructTracker::init();
     let mut schema_tape = String::new();
-    let mut sub_schemas: HashMap<String, String> = HashMap::new();
-    let mut last_seen_schema: (String, TokenType) = (String::new(), TokenType::Invalid);
 
     let mut token_iter = Lexer::new(haystack.bytes(), BufferType::Span).peekable();
     loop {
@@ -203,15 +148,6 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                 if last_curly_open.is_none() {
                     return Err("invalid json: missing opening curly brace");
                 }
-                let curly_open = last_curly_open.unwrap();
-                let mut value_schema = String::new();
-                value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                last_seen_schema = add_sub_schema(
-                    &mut sub_schemas,
-                    value_schema,
-                    &token.kind,
-                    unionize, // skip sorting if going to take the largest schema
-                );
 
                 struct_t.last_open_pin.pop();
             }
@@ -238,15 +174,6 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
                 if last_bracket_open.is_none() {
                     return Err("invalid json: missing opening curly brace");
                 }
-                let curly_open = last_bracket_open.unwrap();
-                let mut value_schema = String::new();
-                value_schema.clone_from(&schema_tape[curly_open.2..].to_string());
-                last_seen_schema = add_sub_schema(
-                    &mut sub_schemas,
-                    value_schema,
-                    &token.kind,
-                    unionize, // skip sorting if going to take the largest schema
-                );
 
                 struct_t.arr_idx.pop();
                 struct_t.last_open_pin.pop();
@@ -297,15 +224,13 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
         }
     }
 
-    debug!("{:?}", sub_schemas);
-
     info!("done");
-    let full_schema = hydrate_schema(&sub_schemas, last_seen_schema.0);
-    let mut json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
+    let mut json: Value = serde_json::from_str(schema_tape.as_str()).expect("JSON parsing error");
     json = deduplicate_arrays(json);
+    json = sort_serde_json(&json);
 
     // Perform union at top level
-    if unionize && last_seen_schema.1.eq(&TokenType::BracketClose) {
+    if unionize {
         Ok(unionize_schema(&json, true))
     } else {
         Ok(json.to_string())
@@ -313,15 +238,18 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
 }
 
 fn unionize_schema(json: &Value, array_wrap: bool) -> String {
-    let mut first = json.as_array().unwrap().first().unwrap().clone();
-    for next in json.as_array().unwrap().iter() {
-        first.merge(next);
-    }
+    if json.is_array() {
+        let mut first = json.as_array().unwrap().first().unwrap().clone();
+        for next in json.as_array().unwrap().iter() {
+            first.merge(next);
+        }
 
-    if array_wrap {
-        return "[".to_string() + first.to_string().as_str() + "]";
+        if array_wrap {
+            return "[".to_string() + first.to_string().as_str() + "]";
+        }
+        return first.to_string();
     }
-    first.to_string()
+    json.to_string()
 }
 
 #[cfg(test)]
@@ -329,30 +257,33 @@ mod tests {
     use super::*;
     use std::fs;
 
-    // #[test]
-    fn file_test() {
-        let f = File::open("output.json").unwrap();
-        let data = fs::read_to_string("output.json").unwrap();
-        let result = parse(&data, true);
-        println!("{:?}", result);
+    fn test_sort_serde_json(json: &str) -> Result<String, &'static str> {
+        // First parse to Value
+        let value: Value = serde_json::from_str(json).unwrap();
+
+        // Convert to BTreeMap to sort
+        let sorted = sort_serde_json(&value);
+
+        // Convert back to Value
+        Ok(sorted.to_string())
     }
 
     #[test]
     fn ordering() {
         assert_eq!(
-            sort_raw_json(r#"{"b":"c","a":"f"}"#).unwrap(),
+            test_sort_serde_json(r#"{"b":"c","a":"f"}"#).unwrap(),
             r#"{"a":"f","b":"c"}"#.to_string()
         );
         assert_eq!(
-            sort_raw_json(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"bob":{"f":"g"}}]}"#).unwrap(),
+            test_sort_serde_json(r#"{"c":{"h":"i"}, "a":"b", "e":[2,false,{"bob":{"f":"g"}}]}"#).unwrap(),
             r#"{"a":"b","c":{"h":"i"},"e":[2,false,{"bob":{"f":"g"}}]}"#.to_string()
         );
         assert_eq!(
-            sort_raw_json(r#"[23,12,22,0]"#).unwrap(),
+            test_sort_serde_json(r#"[23,12,22,0]"#).unwrap(),
             r#"[0,12,22,23]"#.to_string()
         );
         assert_eq!(
-            sort_raw_json(r#"["23","12","22","0"]"#).unwrap(),
+            test_sort_serde_json(r#"["23","12","22","0"]"#).unwrap(),
             r#"["0","12","22","23"]"#.to_string()
         );
     }
