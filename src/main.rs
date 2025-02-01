@@ -28,7 +28,7 @@ fn main() {
     let args = Args::parse();
     if args.file.is_some() {
         if args.path.is_none() {
-            match schema_parser::parse(fs::read_to_string(args.file.unwrap()).unwrap().as_str(), args.unionize) {
+            match schema_parser::summarize(fs::read_to_string(args.file.unwrap()).unwrap().as_str(), args.unionize) {
                 Ok(result) => println!("{}", result),
                 Err(error) => panic!("{}", error),
             }
@@ -56,7 +56,7 @@ fn main() {
         };
         if !haystack.is_empty() {
             if args.path.is_none() {
-                match schema_parser::parse(&haystack, args.unionize) {
+                match schema_parser::summarize(&haystack, args.unionize) {
                     Ok(result) => println!("{}", result),
                     Err(error) => panic!("{}", error),
                 }

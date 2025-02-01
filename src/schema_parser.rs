@@ -1,6 +1,6 @@
 use crate::model::j_struct_tracker::JStructTracker;
 use crate::model::stream_tracker::StreamTracker;
-use crate::utils::{find_str, sanitize_output, token_pos};
+use crate::utils::{find_str, is_ndjson, sanitize_output, token_pos};
 use json_tools::{BufferType, Lexer, Token, TokenType};
 use log::{debug, info};
 use md5;
@@ -13,6 +13,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::ops::{Add, ControlFlow};
 use std::path::absolute;
+use std::sync::mpsc;
+use std::thread;
+use std::thread::available_parallelism;
+use futures::executor::{ThreadPool, ThreadPoolBuilder};
+use futures::task::SpawnExt;
+use json_value_merge::Merge;
 
 fn sort_raw_json(json: &str) -> Result<String, &'static str> {
     // First parse to Value
@@ -61,9 +67,6 @@ fn add_sub_schema(
     } else {
         sort_raw_json(&sub_schema).unwrap()
     };
-    if token_type.eq(&TokenType::BracketClose) {
-        sub_schema_sorted = dedup_array(&sub_schema_sorted);
-    }
 
     let hash = murmur3::murmur3_32(&mut sub_schema_sorted.as_bytes(), 0)
         .unwrap()
@@ -75,10 +78,33 @@ fn add_sub_schema(
     (hash.to_string(), token_type.clone())
 }
 
-fn dedup_array(array_schema: &String) -> String {
-    let mut array: Vec<Value> = serde_json::from_str(array_schema).unwrap();
-    array.dedup();
-    serde_json::to_string(&array).unwrap()
+fn deduplicate_arrays(value: Value) -> Value {
+    match value {
+        Value::Array(arr) => {
+            // Convert array elements to strings for comparison
+            let mut seen = HashSet::new();
+            let deduplicated: Vec<Value> = arr
+                .into_iter()
+                .filter(|item| {
+                    // Convert to string for comparison, fallback to empty string if conversion fails
+                    let str_val = item.to_string();
+                    seen.insert(str_val)
+                })
+                .map(|item| deduplicate_arrays(item))
+                .collect();
+            Value::Array(deduplicated)
+        }
+        Value::Object(map) => {
+            // Recursively process object values
+            let new_map: Map<String, Value> = map
+                .into_iter()
+                .map(|(k, v)| (k, deduplicate_arrays(v)))
+                .collect();
+            Value::Object(new_map)
+        }
+        // Return other value types unchanged
+        _ => value,
+    }
 }
 
 fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema: String) -> String {
@@ -98,6 +124,45 @@ fn hydrate_schema(sub_schemas: &HashMap<String, String>, mut schema: String) -> 
     }
 
     schema
+}
+
+pub fn summarize(haystack: &str, unionize: bool) -> Result<String, &'static str> {
+    if is_ndjson(haystack) {
+        let lines: Vec<String> = haystack.lines()
+            .map(String::from)
+            .collect();
+
+        let num_threads = available_parallelism().unwrap().get();
+        let pool = ThreadPoolBuilder::new()
+            .pool_size(num_threads)
+            .create()
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        for line in lines {
+            let tx = tx.clone();
+            let future = async move {
+                tx.send(parse(&line, true).unwrap()).unwrap();
+            };
+            pool.spawn(future).unwrap();
+        }
+
+        drop(tx);
+
+        let mut schemas: Vec<String> = rx.iter().collect();
+        schemas.dedup();
+        let first_schema = schemas.first().unwrap().as_str();
+        let mut first: Value = serde_json::from_str(first_schema).unwrap();
+        for next in schemas.iter() {
+            let next_schema = serde_json::from_str(next).unwrap();
+            first.merge(&next_schema);
+        }
+        let mut json_schema: Value = serde_json::from_str("[]").unwrap();
+        json_schema.merge(&first);
+        Ok(json_schema.to_string())
+    } else {
+        parse(haystack, unionize)
+    }
 }
 
 pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
@@ -236,26 +301,27 @@ pub fn parse(haystack: &str, unionize: bool) -> Result<String, &'static str> {
 
     info!("done");
     let full_schema = hydrate_schema(&sub_schemas, last_seen_schema.0);
-    if last_seen_schema.1.eq(&TokenType::BracketClose) && unionize {
-        let json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
-        let mut longest = 0;
-        let mut longest_idx = 0;
-        for (idx, el) in json.as_array().unwrap().iter().enumerate() {
-            if el.to_string().len() > longest {
-                longest_idx = idx;
-                longest = el.to_string().len();
-            }
-        }
-        let mut json_schema: Value = serde_json::from_str("[]").unwrap();
-        json_schema
-            .as_array_mut()
-            .unwrap()
-            .push(json.as_array().unwrap().get(longest_idx).unwrap().clone());
+    let mut json: Value = serde_json::from_str(full_schema.as_str()).expect("JSON parsing error");
+    json = deduplicate_arrays(json);
 
-        Ok(json_schema.to_string())
+    // Perform union at top level
+    if unionize && last_seen_schema.1.eq(&TokenType::BracketClose) {
+        Ok(unionize_schema(&json, true))
     } else {
-        Ok(full_schema)
+        Ok(json.to_string())
     }
+}
+
+fn unionize_schema(json: &Value, array_wrap: bool) -> String {
+    let mut first = json.as_array().unwrap().first().unwrap().clone();
+    for next in json.as_array().unwrap().iter() {
+        first.merge(next);
+    }
+
+    if array_wrap {
+        return "[".to_string() + first.to_string().as_str() + "]";
+    }
+    first.to_string()
 }
 
 #[cfg(test)]
@@ -327,5 +393,17 @@ mod tests {
             parse(r#"[{"a":"b"},{"f":"g","h":{"a":"c"}},{"a":"d"}]"#, false),
             Ok(r#"[{"a":"string"},{"f":"string","h":{"a":"string"}}]"#.to_string())
         );
+    }
+
+    #[test]
+    fn ndjson_test() {
+        assert_eq!(summarize(r#"{"a":"b"}
+        {"a":"c"}"#, true), Ok(r#"[{"a":"string"}]"#.to_string()));
+
+        assert_eq!(summarize(r#"{"a":"b","f":12}
+        {"a":"c","d":"c"}"#, true), Ok(r#"[{"a":"string","f":"number","d":"string"}]"#.to_string()));
+
+        assert_eq!(summarize(r#"{"a":"b","f":[{"x":"y"},{"x":"v"}]}
+        {"a":"c"}"#, true), Ok(r#"[{"a":"string","f":[{"x":"string"}]}]"#.to_string()));
     }
 }

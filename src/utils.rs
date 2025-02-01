@@ -63,6 +63,20 @@ pub fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<S
     String::from_utf8(buff.clone()).ok()
 }
 
+pub fn is_ndjson(input: &str) -> bool {
+    if input.starts_with("{") {
+        match input.split_once("\n") {
+            None => return true,
+            Some((first, remaining)) => {
+                if first.ends_with("}") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +85,16 @@ mod tests {
         assert_eq!(array_ind("0"), -1);
         assert_eq!(array_ind("waef"), -1);
         assert_eq!(array_ind("[11]"), 11);
+    }
+
+    #[test]
+    fn is_ndjson_test() {
+        assert_eq!(is_ndjson("{}"), true);
+        assert_eq!(is_ndjson(r#"{"a":"b"}
+        {"a":"c"}"#), true);
+        assert_eq!(is_ndjson(r#"[{"a":"b"},{"a":"c"}]"#), false);
+        assert_eq!(is_ndjson(r#"[{"a":"b"},
+        {"a":"c"}]"#), false);
     }
 
     #[test]
