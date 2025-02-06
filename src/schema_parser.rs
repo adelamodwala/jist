@@ -1,10 +1,11 @@
 use crate::model::j_struct_tracker::JStructTracker;
 use crate::model::stream_tracker::StreamTracker;
 use crate::utils::{find_str, is_ndjson, sanitize_output, token_pos};
+use futures::executor::{ThreadPool, ThreadPoolBuilder};
+use futures::task::SpawnExt;
 use json_tools::{BufferType, Lexer, Token, TokenType};
+use json_value_merge::Merge;
 use log::{debug, info};
-use md5;
-use md5::Digest;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
@@ -16,9 +17,6 @@ use std::path::absolute;
 use std::sync::mpsc;
 use std::thread;
 use std::thread::available_parallelism;
-use futures::executor::{ThreadPool, ThreadPoolBuilder};
-use futures::task::SpawnExt;
-use json_value_merge::Merge;
 
 fn sort_serde_json(value: &Value) -> Value {
     match value {
@@ -255,7 +253,6 @@ fn unionize_schema(json: &Value, array_wrap: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     fn test_sort_serde_json(json: &str) -> Result<String, &'static str> {
         // First parse to Value
