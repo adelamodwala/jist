@@ -115,9 +115,9 @@ For example, this content
 [{"a":"b","f":12}, {"a":"c","d":"c"}]
 ```
 should have schema
-```json
+```shell
 $ echo '[{"a":"b","f":12}, {"a":"c","d":"c"}]' | jist -u
-[{"a":"string","f":[{"x":"string"}]}]
+[{"a":"string","d":"string","f":"number"}]
 ```
 
 # Algorithm
