@@ -104,6 +104,8 @@ pub fn summarize(haystack: &str, unionize: bool) -> Result<String, &'static str>
         }
         let mut json_schema: Value = serde_json::from_str("[]").unwrap();
         json_schema.merge(&first);
+        json_schema = deduplicate_arrays(json_schema);
+        json_schema = sort_serde_json(&json_schema);
         Ok(json_schema.to_string())
     } else {
         parse(haystack, unionize)
@@ -329,7 +331,7 @@ mod tests {
         {"a":"c"}"#, true), Ok(r#"[{"a":"string"}]"#.to_string()));
 
         assert_eq!(summarize(r#"{"a":"b","f":12}
-        {"a":"c","d":"c"}"#, true), Ok(r#"[{"a":"string","f":"number","d":"string"}]"#.to_string()));
+        {"a":"c","d":"c"}"#, true), Ok(r#"[{"a":"string","d":"string","f":"number"}]"#.to_string()));
 
         assert_eq!(summarize(r#"{"a":"b","f":[{"x":"y"},{"x":"v"}]}
         {"a":"c"}"#, true), Ok(r#"[{"a":"string","f":[{"x":"string"}]}]"#.to_string()));
