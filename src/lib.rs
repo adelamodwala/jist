@@ -3,6 +3,8 @@ use std::io::Read;
 pub mod buf_parser;
 pub mod simd_parser;
 pub mod utils;
+pub mod schema_parser;
+mod model;
 
 #[cfg(test)]
 mod tests {

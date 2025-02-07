@@ -1,92 +1,12 @@
-use crate::utils::{array_ind, checkpoint_depth, sanitize_output, token_pos};
+use crate::utils::{array_ind, checkpoint_depth, find_str, sanitize_output, token_pos};
 use crate::{buf_parser, utils};
 use json_tools::{BufferType, Lexer, TokenType};
 use log::debug;
 use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
-
-pub struct StreamTracker {
-    pub last_stream_pos: u64,
-    pub last_chunk_len: usize,
-    pub buffer: Vec<u8>,
-    pub chunk: Vec<u8>,
-}
-impl StreamTracker {
-    pub fn new(chunk_size: usize) -> StreamTracker {
-        StreamTracker {
-            last_stream_pos: 0,
-            last_chunk_len: 0,
-            buffer: Vec::with_capacity(chunk_size * 2), // Extra space for overflow,
-            chunk: Vec::new(),
-        }
-    }
-}
-
-struct JStructTracker {
-    // tuple of (depth, arr_depth, obj_depth)
-    depth_curr: (i32, i32, i32),
-
-    // keep track of array indices if currently inside array
-    arr_idx: Vec<i64>,
-    last_open: Vec<TokenType>,
-    checkpoint_start: Vec<u64>,
-    last_token_key_delimiter: bool,
-
-    // build checkpoints that must pass
-    checkpoints: Vec<(i32, i32, i32)>,
-    search_keys: Vec<String>,
-    arr_tgt: Vec<i64>,
-    arr_tgt_size: usize,
-}
-impl JStructTracker {
-    fn new(search_path: &[String]) -> JStructTracker {
-        let mut struct_tracker = JStructTracker {
-            depth_curr: (-1, -1, -1),
-            arr_idx: Vec::new(),
-            last_open: Vec::new(),
-            checkpoint_start: Vec::new(),
-            last_token_key_delimiter: false,
-            checkpoints: Vec::new(),
-            search_keys: Vec::new(),
-            arr_tgt: Vec::new(),
-            arr_tgt_size: 0,
-        };
-
-        for search_idx in 0..search_path.len() {
-            struct_tracker
-                .checkpoints
-                .push(checkpoint_depth(search_path, search_idx));
-        }
-        struct_tracker.checkpoints.reverse();
-
-        struct_tracker.arr_tgt = search_path
-            .iter()
-            .filter(|x| x.starts_with('['))
-            .map(|x| array_ind(x.as_str()))
-            .rev()
-            .collect();
-        struct_tracker.arr_tgt_size = struct_tracker.arr_tgt.len();
-        struct_tracker.search_keys = search_path
-            .iter()
-            .filter(|x| !x.starts_with('['))
-            .cloned()
-            .rev()
-            .collect::<Vec<String>>();
-        debug!(
-            "checkpoints: {:?}, arr_tgt: {:?}, search_keys: {:?}",
-            struct_tracker.checkpoints, struct_tracker.arr_tgt, struct_tracker.search_keys
-        );
-        struct_tracker
-    }
-}
-
-fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<String> {
-    let mut buff = vec![0u8; end as usize - start as usize];
-    seeker.seek(SeekFrom::Start(start)).expect("error");
-    seeker.read_exact(&mut buff).expect("error");
-    String::from_utf8(buff.clone()).ok()
-}
+use crate::model::j_struct_tracker::JStructTracker;
+use crate::model::stream_tracker::StreamTracker;
 
 pub fn search(
     haystack: Option<&str>,
@@ -158,7 +78,6 @@ pub fn _search<R: Read + Seek + BufRead>(
 
                 let mut token = token_opt.unwrap();
 
-                let arr_idx_len = struct_t.arr_idx.len();
                 match token.kind {
                     TokenType::CurlyOpen => {
                         struct_t.depth_curr.0 += 1;
@@ -186,6 +105,7 @@ pub fn _search<R: Read + Seek + BufRead>(
                         if struct_t.depth_curr.1 > -1                    // must be inside an array
                             && *struct_t.last_open.last().unwrap() == TokenType::BracketOpen
                         {
+                            let arr_idx_len = struct_t.arr_idx.len();
                             struct_t.arr_idx[arr_idx_len - 1] += 1;
                         }
                     }

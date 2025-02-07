@@ -11,11 +11,11 @@ lazy_static = "1.5.0"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 json-tools = "*"
 log = "0.4.22"
-md5 = "0.7.0"
 cxx = "1.0.136"
 autocxx = "0.27.0"
+futures = { version = "0.3.31", features = ["thread-pool"] }
+json_value_merge = "2.0.1"
 
 [build-dependencies]
 autocxx-build = "0.27.0"
 miette = { version = "7.4.0", features = ["fancy"] }
-cc = { version = "1.0", features = ["parallel"] }

@@ -2,6 +2,7 @@ use json_tools::Buffer;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde_json::Value;
+use std::io::{Read, Seek, SeekFrom};
 
 lazy_static! {
     static ref ARRAY_REGEX: Regex = Regex::new(r"^\[(\d+)\]$").unwrap();
@@ -55,6 +56,27 @@ pub(crate) fn sanitize_output(out: &str) -> String {
     sanitized.to_string()
 }
 
+pub fn find_str<R: Read + Seek>(mut seeker: R, start: u64, end: u64) -> Option<String> {
+    let mut buff = vec![0u8; end as usize - start as usize];
+    seeker.seek(SeekFrom::Start(start)).expect("error");
+    seeker.read_exact(&mut buff).expect("error");
+    String::from_utf8(buff.clone()).ok()
+}
+
+pub fn is_ndjson(input: &str) -> bool {
+    if input.starts_with("{") {
+        match input.split_once("\n") {
+            None => return true,
+            Some((first, remaining)) => {
+                if first.ends_with("}") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +85,16 @@ mod tests {
         assert_eq!(array_ind("0"), -1);
         assert_eq!(array_ind("waef"), -1);
         assert_eq!(array_ind("[11]"), 11);
+    }
+
+    #[test]
+    fn is_ndjson_test() {
+        assert_eq!(is_ndjson("{}"), true);
+        assert_eq!(is_ndjson(r#"{"a":"b"}
+        {"a":"c"}"#), true);
+        assert_eq!(is_ndjson(r#"[{"a":"b"},{"a":"c"}]"#), false);
+        assert_eq!(is_ndjson(r#"[{"a":"b"},
+        {"a":"c"}]"#), false);
     }
 
     #[test]

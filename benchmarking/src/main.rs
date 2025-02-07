@@ -1,13 +1,14 @@
+use clap::Parser;
+use generator::generate_connection_info;
+use humansize::{format_size, DECIMAL};
 use rand::Rng;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::sync::mpsc;
 use std::thread::{self, available_parallelism};
 use std::time::Instant;
-use clap::Parser;
-use humansize::{format_size, DECIMAL};
 
-const JSON_TEMPLATE: &str = r#"    {
+const JSON_TEMPLATE_FOO: &str = r#"    {
         "bar": {
             "baz": "{baz}",
             "bizbizbiz": "{bizbizbiz}",
@@ -15,7 +16,7 @@ const JSON_TEMPLATE: &str = r#"    {
                 {bouou1},
                 {bouou2}
             ],
-            "poo": "{poo}"
+            "poo": {poo}
         },
         "foo": {foo}
     }"#;
@@ -30,6 +31,9 @@ struct Args {
 
     #[arg(short, long)]
     out: Option<String>,
+
+    #[arg(short, long)]
+    ndjson: Option<bool>,
 }
 
 fn main() {
@@ -38,8 +42,13 @@ fn main() {
     let num_threads = available_parallelism().unwrap().get();
     let num_objects = args.n.unwrap_or(num_threads);
     let objects_per_thread = num_objects / num_threads;
+    let ndjson = args.ndjson.unwrap_or(false);
+    let format = match ndjson {
+        true => "ndjson",
+        false => "json",
+    };
 
-    println!("Generating {} objects using {} threads", num_objects, num_threads);
+    println!("Generating {} objects using {} threads in format {}", num_objects, num_threads, format);
     println!("Each thread will generate {} objects in batches of {}", objects_per_thread, BATCH_SIZE);
 
     // Create a channel to receive completion signals
@@ -52,9 +61,7 @@ fn main() {
             let shard_filename = format!("shard_{}.json", thread_id);
             let file = File::create(&shard_filename).unwrap();
             let mut writer = BufWriter::new(file);
-            let mut rng = rand::thread_rng();
 
-            // Write opening bracket
             writer.write_all(b"[\n").unwrap();
 
             // Calculate number of full batches and remaining objects
@@ -62,22 +69,27 @@ fn main() {
             let remainder = objects_per_thread % BATCH_SIZE;
 
             // Pre-allocate string buffer for batch
-            let mut batch = String::with_capacity(BATCH_SIZE * (JSON_TEMPLATE.len() + 100));
+            let mut batch = String::with_capacity(BATCH_SIZE * (JSON_TEMPLATE_FOO.len() + 100));
 
             // Process full batches
             for batch_num in 0..num_batches {
                 batch.clear(); // Clear the string but keep capacity
 
                 for i in 0..BATCH_SIZE {
-                    let json = JSON_TEMPLATE
-                        .replace("{baz}", &random_string(&mut rng, 50))
-                        .replace("{bizbizbiz}", &random_string(&mut rng, 25))
-                        .replace("{bouou1}", &rng.gen_range(1..100).to_string())
-                        .replace("{bouou2}", &rng.gen_range(1..100).to_string())
-                        .replace("{poo}", &rng.gen_bool(0.5).to_string())
-                        .replace("{foo}", &rng.gen_range(1..100).to_string());
+                    // let json = JSON_TEMPLATE_FOO
+                    //     .replace("{baz}", &random_string(&mut rng, 50))
+                    //     .replace("{bizbizbiz}", &random_string(&mut rng, 25))
+                    //     .replace("{bouou1}", &rng.gen_range(1..100).to_string())
+                    //     .replace("{bouou2}", &rng.gen_range(1..100).to_string())
+                    //     .replace("{poo}", &rng.gen_bool(0.5).to_string())
+                    //     .replace("{foo}", &rng.gen_range(1..100).to_string());
+                    let json = generate_connection_info();
 
                     batch.push_str(&json);
+
+                    if ndjson {
+                        batch.push('\n');
+                    }
 
                     // Add comma if not last object in thread
                     if !(batch_num == num_batches - 1 && i == BATCH_SIZE - 1 && remainder == 0) {
@@ -93,16 +105,22 @@ fn main() {
             if remainder > 0 {
                 batch.clear();
                 for i in 0..remainder {
-                    let json = JSON_TEMPLATE
-                        .replace("{baz}", &random_string(&mut rng, 50))
-                        .replace("{bizbizbiz}", &random_string(&mut rng, 25))
-                        .replace("{bouou1}", &rng.gen_range(1..100).to_string())
-                        .replace("{bouou2}", &rng.gen_range(1..100).to_string())
-                        .replace("{poo}", &rng.gen_bool(0.5).to_string())
-                        .replace("{foo}", &rng.gen_range(1..100).to_string());
+                    // let json = JSON_TEMPLATE_FOO
+                    //     .replace("{baz}", &random_string(&mut rng, 50))
+                    //     .replace("{bizbizbiz}", &random_string(&mut rng, 25))
+                    //     .replace("{bouou1}", &rng.gen_range(1..100).to_string())
+                    //     .replace("{bouou2}", &rng.gen_range(1..100).to_string())
+                    //     .replace("{poo}", &rng.gen_bool(0.5).to_string())
+                    //     .replace("{foo}", &rng.gen_range(1..100).to_string());
+
+                    let json = generate_connection_info();
 
                     batch.push_str(&json);
-                    if i < remainder - 1 {
+                    if ndjson {
+                        batch.push('\n');
+                    }
+
+                    if i < remainder - 1 && !ndjson {
                         batch.push_str(",\n");
                     }
                 }
@@ -126,10 +144,10 @@ fn main() {
     // Combine shards into final output
     let output_file = File::create(args.out.unwrap_or("../output.json".to_string())).unwrap();
     let mut writer = BufWriter::new(&output_file);
-    writer.write_all(b"[\n").unwrap();
 
-    // Use larger buffer for combining files
-    let mut buffer: Vec<String> = Vec::with_capacity(BATCH_SIZE * (JSON_TEMPLATE.len() + 100));
+    if !ndjson {
+        writer.write_all(b"[\n").unwrap();
+    }
 
     for (i, shard_file) in shard_files.iter().enumerate() {
         // Read shard content (skipping first [ and last ])
@@ -138,7 +156,7 @@ fn main() {
         writer.write_all(content.as_bytes()).unwrap();
 
         // Add comma if not last shard
-        if i < shard_files.len() - 1 {
+        if i < shard_files.len() - 1 && !ndjson {
             writer.write_all(b",\n").unwrap();
         }
 
@@ -146,7 +164,9 @@ fn main() {
         fs::remove_file(shard_file).unwrap();
     }
 
-    writer.write_all(b"\n]").unwrap();
+    if !ndjson {
+        writer.write_all(b"\n]").unwrap();
+    }
     writer.flush().unwrap();
 
     let duration = start_time.elapsed();
