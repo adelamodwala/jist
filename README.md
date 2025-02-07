@@ -1,6 +1,6 @@
 # Overview
 
-`jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key as fast as possible.
+`jist` attempts to find the complete JSON value (string, number, bool, or JSON object) for a given search key as fast as possible. You can also summarize a full json/ndjson file into a schema to you know... get the "jist" of it ;)
 
 ## Benchmarks
 `jist` uses the state-of-the art [simdjson](https://github.com/simdjson/simdjson) library for parsing JSON input / files smaller than 4.2GB in size.
@@ -102,6 +102,23 @@ adelamodwala
 $ wget https://api.github.com/repos/adelamodwala/rustbook/commits?per_page=1 | jist -p "[0].parents"
 []
 ```
+4. To get the schema of a json/ndjson file:
+```
+$ jist -f "path_to_file"
+```
+If you know the file is an array of objects that should share the same schema, use the "unionize" flag:
+```
+$ jist -f "path_to_file" -u
+```
+For example, this content
+```json
+[{"a":"b","f":12}, {"a":"c","d":"c"}]
+```
+should have schema
+```json
+$ echo '[{"a":"b","f":12}, {"a":"c","d":"c"}]' | jist -u
+[{"a":"string","f":[{"x":"string"}]}]
+```
 
 # Algorithm
 `jist` uses [simdjson](https://github.com/simdjson/simdjson), a C++ library, over a rust-C++ bridge. While a pure rust implementation of simdjson exists, it performed twice as slow as the native C++ version in my testing.
@@ -116,6 +133,6 @@ When the JSON input file is too large or in streaming mode, `jist` falls back to
 - [x] Parsing the entire input JSON object is not necessary, simply finding the search key path using JSON format is sufficient (streaming mode or when file is too large only)
 - [x] Streaming the JSON input should be possible, though will not be part of the starting design
 - [x] SIMD: the final frontier
-- [ ] Feature: generate JSON schema, like super fast
+- [x] Feature: generate JSON schema, like super fast
 - [ ] Search over compressed files like `gzip` and `bgzip`
 
