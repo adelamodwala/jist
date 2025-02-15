@@ -5,6 +5,7 @@ pub mod simd_parser;
 pub mod utils;
 pub mod schema_parser;
 mod model;
+pub mod schema_stream_parser;
 
 #[cfg(test)]
 mod tests {

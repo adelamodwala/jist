@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::thread::available_parallelism;
 
-fn sort_serde_json(value: &Value) -> Value {
+pub(crate) fn sort_serde_json(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
             // Convert Map to BTreeMap to sort keys
@@ -42,7 +42,7 @@ fn sort_serde_json(value: &Value) -> Value {
     }
 }
 
-fn deduplicate_arrays(value: Value) -> Value {
+pub(crate) fn deduplicate_arrays(value: Value) -> Value {
     match value {
         Value::Array(arr) => {
             // Convert array elements to strings for comparison

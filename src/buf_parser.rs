@@ -45,6 +45,7 @@ pub fn _search<R: Read + Seek + BufRead>(
     let mut struct_t = JStructTracker::new(search_path);
 
     loop {
+        reader.seek(SeekFrom::Start(stream_t.last_stream_pos)).expect("Unable to seek");
         let bytes_read = reader
             .by_ref()
             .take(chunk_size as u64)
@@ -234,7 +235,7 @@ pub fn _search<R: Read + Seek + BufRead>(
             // Clear chunk for next iteration
             stream_t.chunk.clear();
             // Remove processed data from buffer
-            stream_t.buffer.drain(..=last_chunk.len());
+            stream_t.buffer.clear();
         } else {
             return Err("result not found");
         }

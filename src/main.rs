@@ -1,5 +1,5 @@
 use clap::Parser;
-use jist::{buf_parser, schema_parser, simd_parser, utils};
+use jist::{buf_parser, schema_parser, schema_stream_parser, simd_parser, utils};
 use log::debug;
 use std::fs::File;
 use std::{fs, io};
@@ -28,10 +28,18 @@ fn main() {
     let args = Args::parse();
     if args.file.is_some() {
         if args.path.is_none() {
-            match schema_parser::summarize(fs::read_to_string(args.file.unwrap()).unwrap().as_str(), args.unionize) {
-                Ok(result) => println!("{}", result),
-                Err(error) => panic!("{}", error),
+            if args.streaming {
+                match schema_stream_parser::parse(None, Some(args.file.unwrap().as_str())) {
+                    Ok(result) => println!("{}", result),
+                    Err(error) => panic!("{}", error),
+                }
+            } else {
+                match schema_parser::summarize(fs::read_to_string(args.file.unwrap()).unwrap().as_str(), args.unionize) {
+                    Ok(result) => println!("{}", result),
+                    Err(error) => panic!("{}", error),
+                }
             }
+
         } else {
             assert!(args.path.is_some());
             match search(
@@ -56,9 +64,16 @@ fn main() {
         };
         if !haystack.is_empty() {
             if args.path.is_none() {
-                match schema_parser::summarize(&haystack, args.unionize) {
-                    Ok(result) => println!("{}", result),
-                    Err(error) => panic!("{}", error),
+                if args.streaming {
+                    match schema_stream_parser::parse(Some(&haystack), None) {
+                        Ok(result) => println!("{}", result),
+                        Err(error) => panic!("{}", error),
+                    }
+                } else {
+                    match schema_parser::summarize(&haystack, args.unionize) {
+                        Ok(result) => println!("{}", result),
+                        Err(error) => panic!("{}", error),
+                    }
                 }
             } else {
                 assert!(args.path.is_some());
